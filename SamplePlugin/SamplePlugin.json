@@ -1,0 +1,12 @@
+{
+    "Author":  "Your Name",
+    "Name":  "Sample Plugin",
+    "Tags":  [
+                 "sample",
+                 "template",
+                 "mvu"
+             ],
+    "Description":  "A sample Dalamud plugin demonstrating MVU architecture with strict separation of concerns",
+    "Punchline":  "A short description",
+    "ApplicableVersion":  "any"
+}
