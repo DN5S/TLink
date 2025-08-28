@@ -10,6 +10,7 @@ using TLink.Modules.Translation.Models;
 using TLink.Modules.Translation.MVU;
 using TLink.Modules.Translation.Services;
 using TLink.Modules.Translation.UI;
+using TLink.Utils;
 
 namespace TLink.Modules.Translation;
 
@@ -24,14 +25,14 @@ namespace TLink.Modules.Translation;
     Priority = 10)]
 public class TranslationModule : ModuleBase, IPipelineHandlerRegistry
 {
-    private readonly List<ITranslationPipelineHandler> registeredHandlers = new();
+    private readonly List<ITranslationPipelineHandler> registeredHandlers = [];
     private TranslationWindow? window;
     private TranslationViewModel? viewModel;
     private Store<TranslationState>? store;
     private TranslationConfig? moduleConfig;
     
     public override string Name => "Translation";
-    public override string Version => "2.0.0";
+    public override string Version => "1.0.1";
     public override string[] Dependencies => ["Chat"];
     
     public override void RegisterServices(IServiceCollection services)

@@ -2,6 +2,7 @@ using Microsoft.Extensions.DependencyInjection;
 using TLink.Core.Configuration;
 using TLink.Core.Module;
 using TLink.Modules.Translation.Services;
+using TLink.Utils;
 
 namespace TLink.Modules.Translation.Providers.DeepL;
 

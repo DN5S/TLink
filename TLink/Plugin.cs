@@ -6,6 +6,7 @@ using TLink.Core.Configuration;
 using TLink.Core.Module;
 using TLink.Core.Reactive;
 using TLink.Core.UI;
+using TLink.Utils;
 
 namespace TLink;
 
@@ -46,6 +47,7 @@ public sealed class Plugin : IDalamudPlugin
         services.AddSingleton<ModuleManager>();
         services.AddSingleton<IConfiguration>(configuration);
         services.AddSingleton(configuration);
+        services.AddSingleton<SeStringProcessor>();
         
         // Build service provider
         serviceProvider = services.BuildServiceProvider();

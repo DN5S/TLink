@@ -6,7 +6,7 @@ using System.Web;
 using Dalamud.Game.Text.SeStringHandling;
 using Dalamud.Game.Text.SeStringHandling.Payloads;
 
-namespace TLink.Modules.Translation.Services;
+namespace TLink.Utils;
 
 /// <summary>
 /// Converts SeString to semantic XML format for translation and back.

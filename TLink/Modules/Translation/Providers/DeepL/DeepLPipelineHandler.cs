@@ -6,6 +6,7 @@ using System.Threading.Tasks;
 using Dalamud.Plugin.Services;
 using TLink.Modules.Translation.Models;
 using TLink.Modules.Translation.Services;
+using TLink.Utils;
 
 namespace TLink.Modules.Translation.Providers.DeepL;
 
