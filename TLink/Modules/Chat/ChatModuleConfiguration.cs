@@ -31,13 +31,9 @@ public class ChatModuleConfiguration : ModuleConfiguration
             XivChatType.Alliance,
             XivChatType.FreeCompany,
             XivChatType.Ls1,
-            XivChatType.Ls2,
-            XivChatType.Ls3,
-            XivChatType.Ls4,
-            XivChatType.Ls5,
-            XivChatType.Ls6,
-            XivChatType.Ls7,
-            XivChatType.Ls8
+            XivChatType.CrossLinkShell1,
+            XivChatType.NPCDialogue,
+            XivChatType.NPCDialogueAnnouncements
         ];
     }
     

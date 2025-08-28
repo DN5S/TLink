@@ -1,6 +1,7 @@
 using System;
 using Dalamud.Game.Text;
 using Dalamud.Plugin.Services;
+using Dalamud.Game.Text.SeStringHandling;
 using Microsoft.Extensions.DependencyInjection;
 using TLink.Core.Module;
 using TLink.Core.MVU;
@@ -8,7 +9,7 @@ using TLink.Modules.Chat.Models;
 
 namespace TLink.Modules.Chat;
 
-[ModuleInfo("Chat", "1.0.0", Description = "Chat monitoring and filtering module", Author = "DN5S")]
+[ModuleInfo("Chat", "1.0.0", Description = "Chat monitoring module", Author = "DN5S")]
 public class ChatModule : ModuleBase
 {
     private ChatWindow? window;
@@ -63,15 +64,16 @@ public class ChatModule : ModuleBase
         Logger.Information("Chat module initialized with MVU pattern");
     }
     
-    private void OnChatMessage(XivChatType type, int timestamp, ref Dalamud.Game.Text.SeStringHandling.SeString sender, ref Dalamud.Game.Text.SeStringHandling.SeString message, ref bool isHandled)
+    private void OnChatMessage(XivChatType type, int timestamp, ref SeString sender, ref SeString message, ref bool isHandled)
     {
         var chatMessage = new ChatMessage
         {
             Type = type,
-            // Use current time instead of the timestamp parameter which may not be reliable
             Timestamp = DateTime.Now,
             Sender = sender.TextValue,
-            Message = message.TextValue
+            Message = message.TextValue,
+            SeStringSender = new SeString(sender.Payloads),
+            SeStringMessage = new SeString(message.Payloads)
         };
         
         store?.Dispatch(new AddMessageAction(chatMessage));

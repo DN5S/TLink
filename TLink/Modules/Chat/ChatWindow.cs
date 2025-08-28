@@ -3,6 +3,7 @@ using System.Linq;
 using System.Numerics;
 using Dalamud.Bindings.ImGui;
 using Dalamud.Game.Text;
+using Dalamud.Interface.Utility;
 using Dalamud.Interface.Utility.Raii;
 using Dalamud.Interface.Windowing;
 using TLink.Core.UI;
@@ -126,10 +127,12 @@ public class ChatWindow : Window, IDisposable
             }
             
             ImGui.TableNextColumn();
-            ImGui.TextUnformatted(message.Sender);
+            // Render sender with SeString formatting preserved (colors, icons, etc.)
+            ImGuiHelpers.SeStringWrapped(message.SeStringSender.Encode());
             
             ImGui.TableNextColumn();
-            ImGui.TextWrapped(message.Message);
+            // Render the message with SeString formatting preserved (colors, icons, formatting, clickable links)
+            ImGuiHelpers.SeStringWrapped(message.SeStringMessage.Encode());
         }
         
         if (viewModel.AutoScroll && ImGui.GetScrollY() >= ImGui.GetScrollMaxY())
