@@ -18,7 +18,7 @@ public class DeepLApiClient : IDisposable
     private readonly IPluginLog logger;
     private readonly JsonSerializerOptions jsonOptions;
     
-    private static readonly Dictionary<string, string> LanguageCodeMap = new()
+    public static readonly Dictionary<string, string> LanguageCodeMap = new()
     {
         ["auto"] = "",
         ["ja"] = "JA",

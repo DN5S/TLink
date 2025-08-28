@@ -174,6 +174,14 @@ public class ModuleManager(IServiceProvider globalServices, IPluginLog logger) :
     }
     
     /// <summary>
+    /// Gets a loaded module instance by name
+    /// </summary>
+    public IModule? GetModule(string moduleName)
+    {
+        return modules.FirstOrDefault(m => m.Name == moduleName);
+    }
+    
+    /// <summary>
     /// Gets all modules that directly depend on the specified module
     /// </summary>
     public IReadOnlyList<string> GetDependentModules(string moduleName)

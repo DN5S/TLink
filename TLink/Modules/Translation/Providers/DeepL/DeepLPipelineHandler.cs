@@ -1,5 +1,7 @@
 using System;
+using System.Collections.Generic;
 using System.Diagnostics;
+using System.Linq;
 using System.Threading.Tasks;
 using Dalamud.Plugin.Services;
 using TLink.Modules.Translation.Models;
@@ -24,6 +26,8 @@ public class DeepLPipelineHandler(
     public string Name => "DeepL Translator";
     
     public bool IsEnabled => config.IsEnabled && config.IsConfigured();
+    
+    public IReadOnlyList<string> SupportedLanguages => DeepLApiClient.LanguageCodeMap.Keys.ToList();
 
     public async Task HandleAsync(TranslationContext context, Func<Task> next)
     {

@@ -28,6 +28,7 @@ public static class ServiceRegistrationExtensions
         services.AddSingleton(globalServices.GetRequiredService<IPluginLog>());
         services.AddSingleton(globalServices.GetRequiredService<EventBus>());
         services.AddSingleton(globalServices.GetRequiredService<PluginConfiguration>());
+        services.AddSingleton(globalServices.GetRequiredService<ModuleManager>());
         
         return services;
     }

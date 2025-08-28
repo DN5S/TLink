@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.Linq;
 using TLink.Core.MVU;
@@ -18,6 +19,7 @@ public class TranslationViewModel : IDisposable
     // Observable properties for UI binding
     public ObservableCollection<PipelineHandlerInfo> RegisteredHandlers { get; } = [];
     public ObservableCollection<PipelineExecutionInfo> ActiveExecutions { get; } = [];
+    public List<string> AllSupportedLanguages { get; private set; } = [];
     
     // Pipeline Statistics
     public int TotalExecutions { get; private set; }
@@ -71,6 +73,15 @@ public class TranslationViewModel : IDisposable
         
         // Update processing state
         IsProcessing = state.IsProcessing;
+        
+        // Aggregate supported languages from all enabled handlers
+        AllSupportedLanguages = state.RegisteredHandlers
+            .Where(h => h.IsEnabled)
+            .SelectMany(h => h.SupportedLanguages)
+            .Distinct()
+            .OrderBy(lang => lang == "auto" ? 0 : 1)  // "auto" first
+            .ThenBy(lang => lang)
+            .ToList();
     }
     
     public void EnableHandler(string handlerName, bool isEnabled)

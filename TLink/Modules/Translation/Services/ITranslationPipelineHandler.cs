@@ -34,6 +34,11 @@ public interface ITranslationPipelineHandler
     bool IsEnabled { get; }
     
     /// <summary>
+    /// Gets the list of ISO 639-1 language codes supported by this handler.
+    /// </summary>
+    IReadOnlyList<string> SupportedLanguages { get; }
+    
+    /// <summary>
     /// Handles the translation context.
     /// </summary>
     /// <param name="context">The data object flowing through the pipeline.</param>

@@ -136,7 +136,13 @@ public class TranslationWindow : Window, IDisposable
         ImGui.Text("Language Settings");
         ImGui.Separator();
         
-        var languages = GetSupportedLanguages();
+        var languages = viewModel.AllSupportedLanguages.ToArray();
+        
+        if (languages.Length == 0)
+        {
+            ImGui.TextColored(new Vector4(1, 1, 0, 1), "No translation handlers enabled");
+            return;
+        }
         
         if (ImGui.Combo("Source Language", ref selectedSourceLangIndex, languages, languages.Length))
         {
@@ -265,18 +271,9 @@ public class TranslationWindow : Window, IDisposable
     
     private int GetLanguageIndex(string language)
     {
-        var languages = GetSupportedLanguages();
+        var languages = viewModel.AllSupportedLanguages.ToArray();
         var index = Array.IndexOf(languages, language);
         return index >= 0 ? index : 0;
-    }
-    
-    private static string[] GetSupportedLanguages()
-    {
-        // Handlers can extend default supported languages
-        return
-        [
-            "auto", "en", "ja", "de", "fr", "zh", "ko", "es", "ru", "pt"
-        ];
     }
     
     public void Dispose()

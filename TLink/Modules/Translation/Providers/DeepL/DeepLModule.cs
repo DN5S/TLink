@@ -50,12 +50,21 @@ public class DeepLModule : ModuleBase
     
     public override void Initialize()
     {
-        var handlerRegistry = Services.GetRequiredService<IPipelineHandlerRegistry>();
+        // Get the Translation module instance to access its registry
+        var moduleManager = Services.GetRequiredService<ModuleManager>();
+        var translationModule = moduleManager.GetModule("Translation") as IPipelineHandlerRegistry;
+        
+        if (translationModule == null)
+        {
+            Logger.Error("Translation module not found or does not implement IPipelineHandlerRegistry");
+            return;
+        }
+        
         pipelineHandler = Services.GetRequiredService<DeepLPipelineHandler>();
         
         if (pipelineHandler.IsEnabled)
         {
-            handlerRegistry.RegisterHandler(pipelineHandler);
+            translationModule.RegisterHandler(pipelineHandler);
             Logger.Information($"DeepL handler registered with priority {pipelineHandler.Priority}");
         }
         else
@@ -66,11 +75,13 @@ public class DeepLModule : ModuleBase
     
     public override void Dispose()
     {
-        var handlerRegistry = Services.GetService<IPipelineHandlerRegistry>();
+        // Get the Translation module instance to access its registry
+        var moduleManager = Services.GetService<ModuleManager>();
+        var translationModule = moduleManager?.GetModule("Translation") as IPipelineHandlerRegistry;
         
-        if (pipelineHandler != null && handlerRegistry != null)
+        if (pipelineHandler != null && translationModule != null)
         {
-            handlerRegistry.UnregisterHandler(pipelineHandler.Name);
+            translationModule.UnregisterHandler(pipelineHandler.Name);
             pipelineHandler.Dispose();
         }
         

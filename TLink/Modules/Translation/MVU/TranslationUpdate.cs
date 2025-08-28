@@ -49,7 +49,8 @@ public static class TranslationUpdate
             action.Handler.Priority,
             action.ModuleName,
             action.Handler.IsEnabled,
-            DateTime.UtcNow
+            DateTime.UtcNow,
+            action.Handler.SupportedLanguages
         );
         
         // Add and sort by priority

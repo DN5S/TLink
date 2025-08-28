@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Collections.Immutable;
 using TLink.Core.MVU;
 using TLink.Modules.Translation.Services;
@@ -31,6 +32,7 @@ public record PipelineHandlerInfo(
     string ModuleName,
     bool IsEnabled,
     DateTime RegisteredAt,
+    IReadOnlyList<string> SupportedLanguages,
     int ExecutionCount = 0,
     string? LastError = null
 );
