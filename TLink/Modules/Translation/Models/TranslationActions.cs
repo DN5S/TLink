@@ -1,6 +1,7 @@
 using System;
 using TLink.Core.MVU;
 using TLink.Modules.Chat.Models;
+using TLink.Modules.Translation.Services;
 
 namespace TLink.Modules.Translation.Models;
 
@@ -10,17 +11,51 @@ public abstract record TranslationAction : IAction
     public DateTime Timestamp { get; } = DateTime.UtcNow;
 }
 
-// Request translation of a message
-public record TranslateRequestAction(ChatMessage Message) : TranslationAction;
+// Pipeline Handler Management
+public record RegisterHandlerAction(
+    ITranslationPipelineHandler Handler,
+    string ModuleName
+) : TranslationAction;
 
-// Provider changed
-public record ProviderChangedAction(string ProviderName, bool SupportsXml) : TranslationAction;
+public record UnregisterHandlerAction(
+    string HandlerName
+) : TranslationAction;
 
-// Translation lifecycle
-public record TranslationStartedAction(TranslationRequest Request) : TranslationAction;
-public record TranslationCompletedAction(TranslationRequest Request, TranslationResult Result) : TranslationAction;
-public record TranslationFailedAction(TranslationRequest Request, string Error) : TranslationAction;
+public record EnableHandlerAction(
+    string HandlerName,
+    bool IsEnabled
+) : TranslationAction;
 
-// Cache management
-public record ClearCacheAction : TranslationAction;
-public record UpdateCacheSettingsAction(bool EnableCache, int CacheSize) : TranslationAction;
+// Pipeline Execution
+public record ExecutePipelineAction(
+    ChatMessage Message,
+    string SourceLanguage = "auto",
+    string TargetLanguage = "en"
+) : TranslationAction;
+
+public record PipelineStartedAction(
+    Guid RequestId,
+    TranslationContext Context
+) : TranslationAction;
+
+public record PipelineHandlerExecutedAction(
+    Guid RequestId,
+    string HandlerName,
+    TimeSpan ExecutionTime,
+    bool TerminatedPipeline
+) : TranslationAction;
+
+public record PipelineCompletedAction(
+    Guid RequestId,
+    TranslationResult? Result,
+    TimeSpan TotalExecutionTime
+) : TranslationAction;
+
+public record PipelineFailedAction(
+    Guid RequestId,
+    string Error,
+    string FailedHandlerName
+) : TranslationAction;
+
+// Statistics
+public record ResetStatisticsAction : TranslationAction;

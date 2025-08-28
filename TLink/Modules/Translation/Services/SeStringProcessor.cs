@@ -66,7 +66,7 @@ public class SeStringProcessor
                 
                 case UIGlowPayload { ColorKey: 0 }:
                     // Glow reset
-                    if (openTags.Any() && openTags.Peek().closeTag == "</glow>")
+                    if (openTags.Count != 0 && openTags.Peek().closeTag == "</glow>")
                     {
                         xmlBuilder.Append(openTags.Pop().closeTag);
                     }
@@ -76,7 +76,7 @@ public class SeStringProcessor
                     if (!emphasis.IsEnabled)
                     {
                         // End of emphasis
-                        if (openTags.Any() && openTags.Peek().closeTag == "</em>")
+                        if (openTags.Count != 0 && openTags.Peek().closeTag == "</em>")
                         {
                             xmlBuilder.Append(openTags.Pop().closeTag);
                         }
@@ -268,7 +268,7 @@ public class SeStringProcessor
         return result;
     }
     
-    private void AddClosingPayload(List<Payload> payloads, Payload openingPayload)
+    private static void AddClosingPayload(List<Payload> payloads, Payload openingPayload)
     {
         switch (openingPayload)
         {
@@ -290,7 +290,7 @@ public class SeStringProcessor
         }
     }
     
-    private bool IsEndMarker(RawPayload raw)
+    private static bool IsEndMarker(RawPayload raw)
     {
         // Common end marker patterns for items/players/maps
         var data = raw.Data;

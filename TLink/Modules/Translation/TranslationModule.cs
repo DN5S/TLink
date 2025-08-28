@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using Microsoft.Extensions.DependencyInjection;
 using TLink.Core.Module;
 using TLink.Core.MVU;
@@ -12,51 +13,62 @@ using TLink.Modules.Translation.UI;
 
 namespace TLink.Modules.Translation;
 
-[ModuleInfo("Translation", "1.0.0",
+/// <summary>
+/// Translation Orchestrator Module - Pure pipeline orchestration.
+/// This module knows nothing about how translation works, it only manages the pipeline execution.
+/// </summary>
+[ModuleInfo("Translation", "2.0.0",
     Dependencies = ["Chat"],
-    Description = "Translation hub for managing translation",
+    Description = "Translation pipeline orchestrator",
     Author = "DN5S",
     Priority = 10)]
-public class TranslationModule : ModuleBase, ITranslationProviderRegistry
+public class TranslationModule : ModuleBase, IPipelineHandlerRegistry
 {
-    private readonly Dictionary<string, ITranslationProvider> registeredProviders = new();
+    private readonly List<ITranslationPipelineHandler> registeredHandlers = new();
     private TranslationWindow? window;
     private TranslationViewModel? viewModel;
     private Store<TranslationState>? store;
     private TranslationConfig? moduleConfig;
-    private ITranslationProvider? activeProvider;
     
     public override string Name => "Translation";
-    public override string Version => "1.0.0";
+    public override string Version => "2.0.0";
     public override string[] Dependencies => ["Chat"];
     
     public override void RegisterServices(IServiceCollection services)
     {
-        // Register the translation hub store
-        services.AddSingleton<IStore<TranslationState>>(sp =>
+        // Register the orchestrator store
+        services.AddSingleton<IStore<TranslationState>>(_ =>
         {
             store = new Store<TranslationState>(
                 TranslationState.Initial,
                 TranslationUpdate.Update
             );
             
-            // Register effect handler for routing translations
-            store.RegisterEffectHandler(new TranslateRoutingEffectHandler(
-                () => activeProvider,
-                sp.GetRequiredService<SeStringProcessor>(),
+            // Register pipeline execution handler
+            store.RegisterEffectHandler(new PipelineExecutionEffectHandler(
+                GetHandlers,
+                store,
                 EventBus,
                 Logger
             ));
             
+            // Register event publishing handlers
+            store.RegisterEffectHandler(new PublishHandlerRegisteredEffectHandler(EventBus));
+            store.RegisterEffectHandler(new PublishHandlerUnregisteredEffectHandler(EventBus));
+            store.RegisterEffectHandler(new PublishPipelineStartedEffectHandler(EventBus));
+            store.RegisterEffectHandler(new PublishPipelineCompletedEffectHandler(EventBus));
+            store.RegisterEffectHandler(new PublishTranslatedMessageEffectHandler(EventBus));
+            store.RegisterEffectHandler(new PublishTranslationErrorEffectHandler(EventBus));
+            
             return store;
         });
         
-        // Register shared services
+        // Register shared services that handlers might need
         services.AddSingleton<SeStringProcessor>();
         services.AddSingleton<TranslationViewModel>();
         
-        // Register provider registry (for other modules to register providers)
-        services.AddSingleton<ITranslationProviderRegistry>(_ => this);
+        // Register this module as the pipeline handler registry
+        services.AddSingleton<IPipelineHandlerRegistry>(_ => this);
     }
     
     protected override void LoadConfiguration()
@@ -69,130 +81,75 @@ public class TranslationModule : ModuleBase, ITranslationProviderRegistry
         store = (Store<TranslationState>)Services.GetRequiredService<IStore<TranslationState>>();
         viewModel = Services.GetRequiredService<TranslationViewModel>();
         
-        viewModel.Initialize(store, moduleConfig!, registeredProviders);
+        // Initialize a view model with the store
+        viewModel.Initialize(store);
         
         window = new TranslationWindow(viewModel, moduleConfig!, () =>
         {
             SetModuleConfig(moduleConfig!);
-            UpdateActiveProvider();
         });
         
-        // Subscribe to chat messages from the Chat module
+        // Subscribe to chat messages and execute a pipeline for each
         Subscriptions.Add(
             EventBus.Listen<ChatMessageReceived>()
                 .Subscribe(msg =>
                 {
-                    if (activeProvider != null)
-                    {
-                        store.Dispatch(new TranslateRequestAction(msg.Message));
-                    }
-                })
-        );
-        
-        // Subscribe to translation results from providers
-        Subscriptions.Add(
-            EventBus.Listen<ProviderTranslationCompleted>()
-                .Subscribe(result =>
-                {
-                    store.Dispatch(new TranslationCompletedAction(
-                        result.Request,
-                        result.Result
-                    ));
-                    
-                    // Publish for other modules
-                    EventBus.Publish(new MessageTranslatedEvent(
-                        result.Request.Message,
-                        result.Result
+                    // Execute the pipeline for each message
+                    store.Dispatch(new ExecutePipelineAction(
+                        msg.Message,
+                        moduleConfig?.SourceLanguage ?? "auto",
+                        moduleConfig?.TargetLanguage ?? "en"
                     ));
                 })
         );
         
-        // Subscribe to translation failures from providers
-        Subscriptions.Add(
-            EventBus.Listen<ProviderTranslationFailed>()
-                .Subscribe(failure =>
-                {
-                    store.Dispatch(new TranslationFailedAction(
-                        failure.Request,
-                        failure.Error
-                    ));
-                    
-                    // Publish error for other modules
-                    EventBus.Publish(new TranslationErrorEvent(
-                        failure.Request.Message,
-                        failure.Error
-                    ));
-                })
-        );
-        
-        // Set an initial active provider
-        UpdateActiveProvider();
-        
-        Logger.Information($"Translation hub initialized with {registeredProviders.Count} providers");
+        Logger.Information("Translation orchestrator initialized");
     }
     
-    public void RegisterProvider(string name, ITranslationProvider provider)
+    // --- IPipelineHandlerRegistry Implementation ---
+    
+    public void RegisterHandler(ITranslationPipelineHandler handler)
     {
-        if (registeredProviders.ContainsKey(name))
+        if (registeredHandlers.Any(h => h.Name == handler.Name))
         {
-            Logger.Warning($"Provider '{name}' is already registered, replacing");
+            Logger.Warning($"Handler '{handler.Name}' is already registered, replacing");
+            registeredHandlers.RemoveAll(h => h.Name == handler.Name);
         }
         
-        registeredProviders[name] = provider;
-        Logger.Information($"Translation provider '{name}' registered");
+        registeredHandlers.Add(handler);
+        registeredHandlers.Sort((a, b) => a.Priority.CompareTo(b.Priority));
         
-        // Update UI
-        viewModel?.UpdateProviderList(registeredProviders);
+        // Notify store about registration
+        store?.Dispatch(new RegisterHandlerAction(handler, handler.GetType().Module.Name));
         
-        // If no active provider, set this as active
-        if (activeProvider == null)
-        {
-            moduleConfig!.ActiveProvider = name;
-            UpdateActiveProvider();
-        }
+        Logger.Information($"Pipeline handler '{handler.Name}' registered with priority {handler.Priority}");
     }
     
-    public void UnregisterProvider(string name)
+    public bool UnregisterHandler(string handlerName)
     {
-        if (registeredProviders.Remove(name))
+        var handler = registeredHandlers.FirstOrDefault(h => h.Name == handlerName);
+        if (handler != null)
         {
-            Logger.Information($"Translation provider '{name}' unregistered");
+            registeredHandlers.Remove(handler);
             
-            // If this was the active provider, clear it
-            if (moduleConfig?.ActiveProvider == name)
-            {
-                activeProvider = null;
-                moduleConfig.ActiveProvider = string.Empty;
-            }
+            // Notify store about unregistration
+            store?.Dispatch(new UnregisterHandlerAction(handlerName));
             
-            viewModel?.UpdateProviderList(registeredProviders);
-        }
-    }
-    
-    private void UpdateActiveProvider()
-    {
-        if (string.IsNullOrEmpty(moduleConfig?.ActiveProvider))
-        {
-            activeProvider = null;
-            return;
+            Logger.Information($"Pipeline handler '{handlerName}' unregistered");
+            return true;
         }
         
-        if (registeredProviders.TryGetValue(moduleConfig.ActiveProvider, out var provider))
-        {
-            activeProvider = provider;
-            Logger.Information($"Active translation provider set to '{moduleConfig.ActiveProvider}'");
-            
-            // Update state with provider info
-            store?.Dispatch(new ProviderChangedAction(
-                moduleConfig.ActiveProvider,
-                provider.SupportsXmlTags
-            ));
-        }
-        else
-        {
-            Logger.Warning($"Provider '{moduleConfig.ActiveProvider}' not found");
-            activeProvider = null;
-        }
+        return false;
+    }
+    
+    public IReadOnlyList<ITranslationPipelineHandler> GetHandlers()
+    {
+        return registeredHandlers.AsReadOnly();
+    }
+    
+    public ITranslationPipelineHandler? GetHandler(string handlerName)
+    {
+        return registeredHandlers.FirstOrDefault(h => h.Name == handlerName);
     }
     
     public override void DrawUI()
@@ -207,28 +164,17 @@ public class TranslationModule : ModuleBase, ITranslationProviderRegistry
     
     public override void Dispose()
     {
+        // Dispose UI components
         window?.Dispose();
         viewModel?.Dispose();
+        
+        // Dispose store
         store?.Dispose();
         
-        // Notify providers about disposal
-        foreach (var provider in registeredProviders.Values)
-        {
-            if (provider is IDisposable disposable)
-            {
-                disposable.Dispose();
-            }
-        }
+        // Clear handlers
+        registeredHandlers.Clear();
         
-        registeredProviders.Clear();
         base.Dispose();
         GC.SuppressFinalize(this);
     }
-}
-
-// Interface for provider registration
-public interface ITranslationProviderRegistry
-{
-    void RegisterProvider(string name, ITranslationProvider provider);
-    void UnregisterProvider(string name);
 }

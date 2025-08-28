@@ -14,11 +14,9 @@ public class TranslationWindow : Window, IDisposable
     private readonly Action saveConfig;
     
     // Temporary values for editing
-    private int selectedProviderIndex = -1;
     private int selectedSourceLangIndex;
     private int selectedTargetLangIndex;
-    private bool tempCacheEnabled;
-    private int tempCacheSize;
+    private string filterText = string.Empty;
     
     public TranslationWindow(
         TranslationViewModel viewModel,
@@ -34,16 +32,20 @@ public class TranslationWindow : Window, IDisposable
         SizeCondition = ImGuiCond.FirstUseEver;
         
         // Initialize temp values
-        tempCacheEnabled = config.EnableCache;
-        tempCacheSize = config.CacheSize;
-        selectedSourceLangIndex = Array.IndexOf(viewModel.SupportedLanguages, config.SourceLanguage);
-        selectedTargetLangIndex = Array.IndexOf(viewModel.SupportedLanguages, config.TargetLanguage);
+        selectedSourceLangIndex = GetLanguageIndex(config.SourceLanguage);
+        selectedTargetLangIndex = GetLanguageIndex(config.TargetLanguage);
     }
     
     public override void Draw()
     {
         if (ImGui.BeginTabBar("TranslationTabs"))
         {
+            if (ImGui.BeginTabItem("Pipeline Handlers"))
+            {
+                DrawHandlers();
+                ImGui.EndTabItem();
+            }
+            
             if (ImGui.BeginTabItem("Configuration"))
             {
                 DrawConfiguration();
@@ -60,101 +62,106 @@ public class TranslationWindow : Window, IDisposable
         }
     }
     
-    public void DrawConfiguration()
+    public void DrawHandlers()
     {
-        var changed = false;
-        
-        // Provider Selection
-        ImGui.Text("Translation Provider");
+        ImGui.Text($"Registered Handlers: {viewModel.HandlerCount} ({viewModel.EnabledHandlerCount} enabled)");
         ImGui.Separator();
         
-        if (viewModel.AvailableProviders.Count == 0)
+        // Filter input
+        ImGui.InputTextWithHint("##filter", "Filter handlers...", ref filterText, 256);
+        
+        ImGui.Spacing();
+        
+        // Handlers' table
+        if (ImGui.BeginTable("HandlersTable", 5, ImGuiTableFlags.Borders | ImGuiTableFlags.RowBg | ImGuiTableFlags.Sortable))
         {
-            ImGui.TextColored(new Vector4(1, 0.5f, 0, 1), "No translation providers registered");
-            ImGui.TextWrapped("Provider modules must be installed separately");
-        }
-        else
-        {
-            // Update selected index based on current provider
-            if (!string.IsNullOrEmpty(viewModel.ActiveProvider))
+            ImGui.TableSetupColumn("Priority", ImGuiTableColumnFlags.DefaultSort | ImGuiTableColumnFlags.WidthFixed, 60);
+            ImGui.TableSetupColumn("Name", ImGuiTableColumnFlags.WidthFixed, 150);
+            ImGui.TableSetupColumn("Module", ImGuiTableColumnFlags.WidthFixed, 100);
+            ImGui.TableSetupColumn("Enabled", ImGuiTableColumnFlags.WidthFixed, 60);
+            ImGui.TableSetupColumn("Executions", ImGuiTableColumnFlags.WidthStretch);
+            ImGui.TableHeadersRow();
+            
+            foreach (var handler in viewModel.RegisteredHandlers
+                .Where(h => string.IsNullOrEmpty(filterText) || 
+                    h.Name.Contains(filterText, StringComparison.OrdinalIgnoreCase)))
             {
-                var currentIndex = viewModel.AvailableProviders
-                    .Select((p, i) => new { Provider = p, Index = i })
-                    .FirstOrDefault(x => x.Provider == viewModel.ActiveProvider)?.Index ?? -1;
-                if (currentIndex != selectedProviderIndex)
+                ImGui.TableNextRow();
+                
+                ImGui.TableNextColumn();
+                ImGui.Text($"{handler.Priority}");
+                
+                ImGui.TableNextColumn();
+                ImGui.Text(handler.Name);
+                
+                ImGui.TableNextColumn();
+                ImGui.TextColored(new Vector4(0.7f, 0.7f, 0.7f, 1), handler.ModuleName);
+                
+                ImGui.TableNextColumn();
+                var enabled = handler.IsEnabled;
+                if (ImGui.Checkbox($"##enabled_{handler.Name}", ref enabled))
                 {
-                    selectedProviderIndex = currentIndex;
+                    viewModel.EnableHandler(handler.Name, enabled);
+                }
+                
+                ImGui.TableNextColumn();
+                ImGui.Text($"{handler.ExecutionCount}");
+                if (handler.LastError != null)
+                {
+                    ImGui.SameLine();
+                    ImGui.TextColored(new Vector4(1, 0, 0, 1), "[Error]");
+                    if (ImGui.IsItemHovered())
+                    {
+                        ImGui.SetTooltip(handler.LastError);
+                    }
                 }
             }
             
-            var providers = viewModel.AvailableProviders.ToArray();
-            if (ImGui.Combo("Active Provider", ref selectedProviderIndex, providers, providers.Length))
-            {
-                if (selectedProviderIndex >= 0 && selectedProviderIndex < providers.Length)
-                {
-                    config.ActiveProvider = providers[selectedProviderIndex];
-                    changed = true;
-                }
-            }
-            
-            if (viewModel.ProviderSupportsFormatting)
-            {
-                ImGui.TextColored(new Vector4(0, 1, 0, 1), "✓ Provider supports formatting preservation");
-            }
-            else
-            {
-                ImGui.TextColored(new Vector4(1, 1, 0, 1), "⚠ Provider uses plain text only");
-            }
+            ImGui.EndTable();
         }
         
         ImGui.Spacing();
+        
+        if (ImGui.Button("Reset Statistics"))
+        {
+            viewModel.ResetStatistics();
+        }
+    }
+    
+    public void DrawConfiguration()
+    {
+        var changed = false;
         
         // Language Settings
         ImGui.Text("Language Settings");
         ImGui.Separator();
         
-        var languages = viewModel.SupportedLanguages;
+        var languages = GetSupportedLanguages();
         
         if (ImGui.Combo("Source Language", ref selectedSourceLangIndex, languages, languages.Length))
         {
-            config.SourceLanguage = languages[selectedSourceLangIndex];
-            changed = true;
+            if (selectedSourceLangIndex >= 0 && selectedSourceLangIndex < languages.Length)
+            {
+                config.SourceLanguage = languages[selectedSourceLangIndex];
+                changed = true;
+            }
         }
         
         if (ImGui.Combo("Target Language", ref selectedTargetLangIndex, languages, languages.Length))
         {
-            config.TargetLanguage = languages[selectedTargetLangIndex];
-            changed = true;
+            if (selectedTargetLangIndex >= 0 && selectedTargetLangIndex < languages.Length)
+            {
+                config.TargetLanguage = languages[selectedTargetLangIndex];
+                changed = true;
+            }
         }
         
         ImGui.Spacing();
-        
-        // Cache Settings
-        ImGui.Text("Cache Settings");
         ImGui.Separator();
+        ImGui.Spacing();
         
-        if (ImGui.Checkbox("Enable Cache", ref tempCacheEnabled))
-        {
-            config.EnableCache = tempCacheEnabled;
-            viewModel.UpdateCacheSettings(tempCacheEnabled, config.CacheSize);
-            changed = true;
-        }
-        
-        if (tempCacheEnabled)
-        {
-            if (ImGui.SliderInt("Cache Size", ref tempCacheSize, 10, 500))
-            {
-                config.CacheSize = tempCacheSize;
-                viewModel.UpdateCacheSettings(config.EnableCache, tempCacheSize);
-                changed = true;
-            }
-            
-            ImGui.SameLine();
-            if (ImGui.Button("Clear Cache"))
-            {
-                viewModel.ClearCache();
-            }
-        }
+        ImGui.TextWrapped("Note: Individual handlers may have their own configuration. " +
+            "Check each module's settings for handler-specific options.");
         
         ImGui.Spacing();
         
@@ -172,13 +179,13 @@ public class TranslationWindow : Window, IDisposable
     
     private void DrawStatistics()
     {
-        ImGui.Text("Translation Statistics");
+        ImGui.Text("Pipeline Statistics");
         ImGui.Separator();
         
         // Current status
-        if (viewModel.IsTranslating)
+        if (viewModel.IsProcessing)
         {
-            ImGui.TextColored(new Vector4(0, 1, 1, 1), "● Translating...");
+            ImGui.TextColored(new Vector4(0, 1, 1, 1), $"● Processing ({viewModel.ActiveExecutions.Count} active)");
         }
         else
         {
@@ -195,71 +202,81 @@ public class TranslationWindow : Window, IDisposable
             
             ImGui.TableNextRow();
             ImGui.TableNextColumn();
-            ImGui.Text("Active Provider");
+            ImGui.Text("Total Executions");
             ImGui.TableNextColumn();
-            ImGui.Text(string.IsNullOrEmpty(viewModel.ActiveProvider) ? "None" : viewModel.ActiveProvider);
+            ImGui.Text($"{viewModel.TotalExecutions}");
             
             ImGui.TableNextRow();
             ImGui.TableNextColumn();
-            ImGui.Text("Total Translations");
+            ImGui.Text("Successful Executions");
             ImGui.TableNextColumn();
-            ImGui.Text($"{viewModel.TotalTranslations}");
+            ImGui.Text($"{viewModel.SuccessfulExecutions}");
             
             ImGui.TableNextRow();
             ImGui.TableNextColumn();
-            ImGui.Text("Cache Hits");
+            ImGui.Text("Failed Executions");
             ImGui.TableNextColumn();
-            ImGui.Text($"{viewModel.CacheHits} ({viewModel.CacheHitRate:P0})");
+            ImGui.Text($"{viewModel.FailedExecutions}");
             
             ImGui.TableNextRow();
             ImGui.TableNextColumn();
-            ImGui.Text("Failed Translations");
+            ImGui.Text("Success Rate");
             ImGui.TableNextColumn();
-            ImGui.Text($"{viewModel.FailedTranslations}");
+            ImGui.Text($"{viewModel.SuccessRate:P0}");
             
             ImGui.TableNextRow();
             ImGui.TableNextColumn();
-            ImGui.Text("Avg Translation Time");
+            ImGui.Text("Avg Pipeline Time");
             ImGui.TableNextColumn();
-            ImGui.Text($"{viewModel.AverageTranslationTime:F0} ms");
+            ImGui.Text($"{viewModel.AveragePipelineTime:F0} ms");
             
             ImGui.EndTable();
         }
         
         ImGui.Spacing();
         
-        // Recent translations
-        ImGui.Text("Recent Translations");
+        // Active Executions
+        ImGui.Text("Active Executions");
         ImGui.Separator();
         
-        if (viewModel.RecentTranslations.Count == 0)
+        if (viewModel.ActiveExecutions.Count == 0)
         {
-            ImGui.TextColored(new Vector4(0.5f, 0.5f, 0.5f, 1), "No translations yet");
+            ImGui.TextColored(new Vector4(0.5f, 0.5f, 0.5f, 1), "No active executions");
         }
         else
         {
-            if (ImGui.BeginChild("RecentTranslations", new Vector2(0, 0), true))
+            if (ImGui.BeginChild("ActiveExecutions", new Vector2(0, 150), true))
             {
-                foreach (var item in viewModel.RecentTranslations.TakeLast(10).Reverse())
+                foreach (var execution in viewModel.ActiveExecutions)
                 {
-                    ImGui.TextColored(new Vector4(0.7f, 0.7f, 0.7f, 1), 
-                        $"[{item.Timestamp:HH:mm:ss}] {item.Channel}");
+                    var duration = (DateTime.UtcNow - execution.StartTime).TotalMilliseconds;
+                    ImGui.Text($"Request {execution.RequestId:B}");
+                    ImGui.SameLine();
+                    ImGui.TextColored(new Vector4(0, 1, 1, 1), $"[{duration:F0}ms]");
                     
-                    ImGui.TextWrapped($"Original: {item.OriginalText}");
-                    ImGui.TextColored(new Vector4(0.5f, 1, 0.5f, 1), 
-                        $"Translation: {item.TranslatedText}");
-                    
-                    if (item.FormattingPreserved)
-                    {
-                        ImGui.SameLine();
-                        ImGui.TextColored(new Vector4(0, 1, 0, 1), "[Formatted]");
-                    }
-                    
+                    ImGui.TextWrapped($"Message: {execution.Message}");
+                    ImGui.Text($"Handlers executed: {execution.HandlersExecuted}");
                     ImGui.Separator();
                 }
                 ImGui.EndChild();
             }
         }
+    }
+    
+    private int GetLanguageIndex(string language)
+    {
+        var languages = GetSupportedLanguages();
+        var index = Array.IndexOf(languages, language);
+        return index >= 0 ? index : 0;
+    }
+    
+    private static string[] GetSupportedLanguages()
+    {
+        // Handlers can extend default supported languages
+        return
+        [
+            "auto", "en", "ja", "de", "fr", "zh", "ko", "es", "ru", "pt"
+        ];
     }
     
     public void Dispose()

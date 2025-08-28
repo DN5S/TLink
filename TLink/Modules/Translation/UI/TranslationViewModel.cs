@@ -1,120 +1,101 @@
 using System;
-using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.Linq;
 using TLink.Core.MVU;
-using TLink.Modules.Translation.Configuration;
 using TLink.Modules.Translation.Models;
-using TLink.Modules.Translation.Services;
 
 namespace TLink.Modules.Translation.UI;
 
+/// <summary>
+/// ViewModel for the Translation orchestrator UI.
+/// Displays pipeline statistics and handler information.
+/// </summary>
 public class TranslationViewModel : IDisposable
 {
     private Store<TranslationState>? store;
     private IDisposable? stateSubscription;
-    private TranslationConfig? config;
     
     // Observable properties for UI binding
-    public ObservableCollection<string> AvailableProviders { get; } = [];
-    public ObservableCollection<TranslationHistoryItem> RecentTranslations { get; } = [];
-
-    // Statistics
-    public int TotalTranslations { get; private set; }
-    public int CacheHits { get; private set; }
-    public int FailedTranslations { get; private set; }
-    public double CacheHitRate => TotalTranslations > 0 ? (double)CacheHits / TotalTranslations : 0;
-    public double AverageTranslationTime { get; private set; }
+    public ObservableCollection<PipelineHandlerInfo> RegisteredHandlers { get; } = [];
+    public ObservableCollection<PipelineExecutionInfo> ActiveExecutions { get; } = [];
     
-    // Provider info
-    public string ActiveProvider { get; private set; } = string.Empty;
-    public bool ProviderSupportsFormatting { get; private set; }
-    public bool IsTranslating { get; private set; }
+    // Pipeline Statistics
+    public int TotalExecutions { get; private set; }
+    public int SuccessfulExecutions { get; private set; }
+    public int FailedExecutions { get; private set; }
+    public double SuccessRate => TotalExecutions > 0 ? (double)SuccessfulExecutions / TotalExecutions : 0;
+    public double AveragePipelineTime { get; private set; }
     
-    // Configuration
-    public string[] SupportedLanguages { get; } =
-    [
-        "auto", "en", "ja", "ko", "zh", "fr", "de", "es", "ru", "pt", "it", "nl", "pl"
-    ];
-
-    public void Initialize(
-        Store<TranslationState> store, 
-        TranslationConfig config,
-        Dictionary<string, ITranslationProvider> providers)
+    // Pipeline State
+    public bool IsProcessing { get; private set; }
+    public int HandlerCount => RegisteredHandlers.Count;
+    public int EnabledHandlerCount => RegisteredHandlers.Count(h => h.IsEnabled);
+    
+    public void Initialize(Store<TranslationState> translationStore)
     {
-        this.store = store;
-        this.config = config;
-        
-        // Initialize provider list
-        UpdateProviderList(providers);
+        store = translationStore;
         
         // Subscribe to state changes
-        stateSubscription = store.StateChanged
-            .Subscribe(state =>
-            {
-                // Update statistics
-                TotalTranslations = state.Statistics.TotalTranslations;
-                CacheHits = state.Statistics.CacheHits;
-                FailedTranslations = state.Statistics.FailedTranslations;
-                AverageTranslationTime = state.Statistics.AverageTranslationTime;
-                
-                // Update provider info
-                ActiveProvider = state.ActiveProvider;
-                ProviderSupportsFormatting = state.ProviderSupportsXml;
-                IsTranslating = state.IsTranslating;
-                
-                // Update translation history from pending/completed
-                UpdateTranslationHistory(state);
-            });
+        stateSubscription = store.StateChanged.Subscribe(UpdateFromState);
+        
+        // Initial update
+        UpdateFromState(store.State);
     }
     
-    public void UpdateProviderList(Dictionary<string, ITranslationProvider> providers)
+    private void UpdateFromState(TranslationState state)
     {
-        AvailableProviders.Clear();
-        foreach (var providerName in providers.Keys.OrderBy(k => k))
+        // Update handler collection
+        RegisteredHandlers.Clear();
+        foreach (var handler in state.RegisteredHandlers)
         {
-            AvailableProviders.Add(providerName);
-        }
-    }
-    
-    public void UpdateCacheSettings(bool enable, int size)
-    {
-        // Dispatch action to update cache settings in state
-        // Config is already updated by the Window
-        store?.Dispatch(new UpdateCacheSettingsAction(enable, size));
-    }
-    
-    public void ClearCache()
-    {
-        store?.Dispatch(new ClearCacheAction());
-    }
-    
-    private void UpdateTranslationHistory(TranslationState state)
-    {
-        // Keep only the last 50 translations for display
-        while (RecentTranslations.Count > 50)
-        {
-            RecentTranslations.RemoveAt(0);
+            RegisteredHandlers.Add(handler);
         }
         
-        // Add any new completed translations
-        // This is simplified - in a real implementation you'd track which ones are new
+        // Update active executions
+        ActiveExecutions.Clear();
+        foreach (var execution in state.ActiveExecutions.Values)
+        {
+            ActiveExecutions.Add(new PipelineExecutionInfo(
+                execution.RequestId,
+                execution.Context.OriginalMessage.Message,
+                execution.StartTime,
+                execution.ExecutedHandlers.Count
+            ));
+        }
+        
+        // Update statistics
+        TotalExecutions = state.Statistics.TotalExecutions;
+        SuccessfulExecutions = state.Statistics.SuccessfulExecutions;
+        FailedExecutions = state.Statistics.FailedExecutions;
+        AveragePipelineTime = state.Statistics.AveragePipelineTime;
+        
+        // Update processing state
+        IsProcessing = state.IsProcessing;
+    }
+    
+    public void EnableHandler(string handlerName, bool isEnabled)
+    {
+        store?.Dispatch(new EnableHandlerAction(handlerName, isEnabled));
+    }
+    
+    public void ResetStatistics()
+    {
+        store?.Dispatch(new ResetStatisticsAction());
     }
     
     public void Dispose()
     {
         stateSubscription?.Dispose();
+        RegisteredHandlers.Clear();
+        ActiveExecutions.Clear();
         GC.SuppressFinalize(this);
     }
 }
 
-public class TranslationHistoryItem
-{
-    public DateTime Timestamp { get; init; }
-    public string Channel { get; init; } = string.Empty;
-    public string Sender { get; init; } = string.Empty;
-    public string OriginalText { get; init; } = string.Empty;
-    public string TranslatedText { get; init; } = string.Empty;
-    public bool FormattingPreserved { get; init; }
-    public TimeSpan TranslationTime { get; init; }
-}
+// Helper class for displaying execution info in UI
+public record PipelineExecutionInfo(
+    Guid RequestId,
+    string Message,
+    DateTime StartTime,
+    int HandlersExecuted
+);

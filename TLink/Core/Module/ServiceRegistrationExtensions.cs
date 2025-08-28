@@ -67,6 +67,7 @@ public static class ServiceRegistrationExtensions
     /// <summary>
     /// Helper method to add a singleton service only if it exists in the source provider
     /// </summary>
+    // ReSharper disable once UnusedMethodReturnValue.Local
     private static IServiceCollection AddSingletonIfExists<T>(this IServiceCollection services, IServiceProvider provider) 
         where T : class
     {

@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Collections.Immutable;
 using System.Linq;
 using TLink.Core.MVU;
@@ -12,195 +13,275 @@ public static class TranslationUpdate
     {
         return action switch
         {
-            TranslateRequestAction req => HandleTranslateRequest(state, req),
-            ProviderChangedAction changed => HandleProviderChanged(state, changed),
-            TranslationStartedAction started => HandleTranslationStarted(state, started),
-            TranslationCompletedAction completed => HandleTranslationCompleted(state, completed),
-            TranslationFailedAction failed => HandleTranslationFailed(state, failed),
-            ClearCacheAction => HandleClearCache(state),
-            UpdateCacheSettingsAction settings => HandleUpdateCacheSettings(state, settings),
+            // Handler Management
+            RegisterHandlerAction register => HandleRegisterHandler(state, register),
+            UnregisterHandlerAction unregister => HandleUnregisterHandler(state, unregister),
+            EnableHandlerAction enable => HandleEnableHandler(state, enable),
+            
+            // Pipeline Execution Lifecycle
+            ExecutePipelineAction execute => HandleExecutePipeline(state, execute),
+            PipelineStartedAction started => HandlePipelineStarted(state, started),
+            PipelineHandlerExecutedAction executed => HandleHandlerExecuted(state, executed),
+            PipelineCompletedAction completed => HandlePipelineCompleted(state, completed),
+            PipelineFailedAction failed => HandlePipelineFailed(state, failed),
+            
+            // Statistics
+            ResetStatisticsAction => HandleResetStatistics(state),
+            
             _ => UpdateResult<TranslationState>.NoChange(state)
         };
     }
     
-    private static UpdateResult<TranslationState> HandleTranslateRequest(
-        TranslationState state, 
-        TranslateRequestAction action)
+    // --- Handler Management ---
+    
+    private static UpdateResult<TranslationState> HandleRegisterHandler(
+        TranslationState state,
+        RegisterHandlerAction action)
     {
-        // Check if a provider is available
-        if (string.IsNullOrEmpty(state.ActiveProvider))
+        // Prevent duplicate registration
+        if (state.RegisteredHandlers.Any(h => h.Name == action.Handler.Name))
         {
             return UpdateResult<TranslationState>.NoChange(state);
         }
         
-        // Check cache first
-        var cacheKey = GenerateCacheKey(action.Message);
-        if (state.TranslationCache.TryGetValue(cacheKey, out var cached))
-        {
-            // Update statistics for cache hit
-            var stats = state.Statistics with
-            {
-                CacheHits = state.Statistics.CacheHits + 1
-            };
-            
-            return UpdateResult<TranslationState>.WithEffects(
-                state with { Statistics = stats },
-                new PublishCachedTranslationEffect(action.Message, cached)
-            );
-        }
-        
-        // Create translation request
-        var request = new TranslationRequest(
-            Guid.NewGuid(),
-            action.Message,
-            "auto", // TODO: Get from config
-            "en",   // TODO: Get from config
+        var handlerInfo = new PipelineHandlerInfo(
+            action.Handler.Name,
+            action.Handler.Priority,
+            action.ModuleName,
+            action.Handler.IsEnabled,
             DateTime.UtcNow
         );
         
-        var newState = state with
-        {
-            PendingTranslations = state.PendingTranslations.Add(request)
-        };
+        // Add and sort by priority
+        var newHandlers = state.RegisteredHandlers
+            .Add(handlerInfo)
+            .Sort((a, b) => a.Priority.CompareTo(b.Priority));
         
-        // Create an effect to route to provider
         return UpdateResult<TranslationState>.WithEffects(
-            newState,
-            new RouteToProviderEffect(request)
+            state with { RegisteredHandlers = newHandlers },
+            new PublishHandlerRegisteredEffect(handlerInfo)
         );
     }
     
-    private static UpdateResult<TranslationState> HandleProviderChanged(
+    private static UpdateResult<TranslationState> HandleUnregisterHandler(
         TranslationState state,
-        ProviderChangedAction action)
+        UnregisterHandlerAction action)
     {
-        return UpdateResult<TranslationState>.StateOnly(state with
+        var handler = state.RegisteredHandlers.FirstOrDefault(h => h.Name == action.HandlerName);
+        if (handler == null)
         {
-            ActiveProvider = action.ProviderName,
-            ProviderSupportsXml = action.SupportsXml
-        });
-    }
-    
-    private static UpdateResult<TranslationState> HandleTranslationStarted(
-        TranslationState state,
-        TranslationStartedAction action)
-    {
-        return UpdateResult<TranslationState>.StateOnly(state with 
-        { 
-            IsTranslating = true 
-        });
-    }
-    
-    private static UpdateResult<TranslationState> HandleTranslationCompleted(
-        TranslationState state,
-        TranslationCompletedAction action)
-    {
-        // Remove from pending
-        var newPending = state.PendingTranslations
-            .RemoveAll(r => r.Id == action.Request.Id);
-        
-        // Add to cache
-        var cacheKey = GenerateCacheKey(action.Request.Message);
-        var newCache = state.TranslationCache;
-        
-        // Simple cache eviction - remove arbitrary item when full
-        // TODO: Implement proper LRU cache with timestamp tracking
-        if (state.TranslationCache.Count >= 100) // TODO: Use config value
-        {
-            // WARNING: This removes an arbitrary item, not the oldest
-            // For true LRU, we'd need to track access times
-            var keyToRemove = newCache.Keys.First();
-            newCache = newCache.Remove(keyToRemove);
+            return UpdateResult<TranslationState>.NoChange(state);
         }
         
-        newCache = newCache.Add(cacheKey, action.Result);
+        var newHandlers = state.RegisteredHandlers.Remove(handler);
         
-        // Update statistics
-        var stats = state.Statistics with
+        return UpdateResult<TranslationState>.WithEffects(
+            state with { RegisteredHandlers = newHandlers },
+            new PublishHandlerUnregisteredEffect(handler)
+        );
+    }
+    
+    private static UpdateResult<TranslationState> HandleEnableHandler(
+        TranslationState state,
+        EnableHandlerAction action)
+    {
+        var handlerIndex = state.RegisteredHandlers.FindIndex(h => h.Name == action.HandlerName);
+        if (handlerIndex < 0)
         {
-            TotalTranslations = state.Statistics.TotalTranslations + 1,
-            AverageTranslationTime = CalculateNewAverage(
-                state.Statistics.AverageTranslationTime,
-                state.Statistics.TotalTranslations,
-                action.Result.TranslationTime.TotalMilliseconds
+            return UpdateResult<TranslationState>.NoChange(state);
+        }
+        
+        var handler = state.RegisteredHandlers[handlerIndex];
+        var updatedHandler = handler with { IsEnabled = action.IsEnabled };
+        var newHandlers = state.RegisteredHandlers.SetItem(handlerIndex, updatedHandler);
+        
+        return UpdateResult<TranslationState>.StateOnly(
+            state with { RegisteredHandlers = newHandlers }
+        );
+    }
+    
+    // --- Pipeline Execution Lifecycle ---
+    
+    private static UpdateResult<TranslationState> HandleExecutePipeline(
+        TranslationState state,
+        ExecutePipelineAction action)
+    {
+        // Only execute if we have enabled handlers
+        if (!state.RegisteredHandlers.Any(h => h.IsEnabled))
+        {
+            return UpdateResult<TranslationState>.NoChange(state);
+        }
+        
+        // Create effect to execute pipeline
+        return UpdateResult<TranslationState>.WithEffects(
+            state,
+            new ExecutePipelineEffect(action.Message, action.SourceLanguage, action.TargetLanguage)
+        );
+    }
+    
+    private static UpdateResult<TranslationState> HandlePipelineStarted(
+        TranslationState state,
+        PipelineStartedAction action)
+    {
+        var execution = new PipelineExecution(
+            action.RequestId,
+            action.Context,
+            DateTime.UtcNow,
+            ImmutableList<string>.Empty
+        );
+        
+        var newExecutions = state.ActiveExecutions.Add(action.RequestId, execution);
+        
+        return UpdateResult<TranslationState>.WithEffects(
+            state with { ActiveExecutions = newExecutions },
+            new PublishPipelineStartedEffect(action.RequestId, action.Context.OriginalMessage)
+        );
+    }
+    
+    private static UpdateResult<TranslationState> HandleHandlerExecuted(
+        TranslationState state,
+        PipelineHandlerExecutedAction action)
+    {
+        if (!state.ActiveExecutions.TryGetValue(action.RequestId, out var execution))
+        {
+            return UpdateResult<TranslationState>.NoChange(state);
+        }
+        
+        // Update execution with the handler name
+        var updatedExecution = execution with
+        {
+            ExecutedHandlers = execution.ExecutedHandlers.Add(action.HandlerName)
+        };
+        
+        var newExecutions = state.ActiveExecutions.SetItem(action.RequestId, updatedExecution);
+        
+        // Update handler statistics
+        var handlerStats = state.Statistics.HandlerStats?.GetValueOrDefault(
+            action.HandlerName,
+            new HandlerStatistics()
+        ) ?? new HandlerStatistics();
+
+        var updatedHandlerStats = new HandlerStatistics(ExecutionCount:
+                                                        handlerStats.ExecutionCount + 1, TerminationCount:
+                                                        action.TerminatedPipeline
+                                                            ? handlerStats.TerminationCount + 1
+                                                            : handlerStats.TerminationCount,
+                                                        AverageExecutionTime: CalculateNewAverage(
+                                                            handlerStats.AverageExecutionTime,
+                                                            handlerStats.ExecutionCount,
+                                                            action.ExecutionTime.TotalMilliseconds
+                                                        ));
+        
+        var newHandlerStats = (state.Statistics.HandlerStats ?? ImmutableDictionary<string, HandlerStatistics>.Empty)
+            .SetItem(action.HandlerName, updatedHandlerStats);
+        
+        var newStatistics = state.Statistics with
+        {
+            HandlerStats = newHandlerStats
+        };
+        
+        return UpdateResult<TranslationState>.StateOnly(state with
+        {
+            ActiveExecutions = newExecutions,
+            Statistics = newStatistics
+        });
+    }
+    
+    private static UpdateResult<TranslationState> HandlePipelineCompleted(
+        TranslationState state,
+        PipelineCompletedAction action)
+    {
+        if (!state.ActiveExecutions.TryGetValue(action.RequestId, out var execution))
+        {
+            return UpdateResult<TranslationState>.NoChange(state);
+        }
+        
+        var newExecutions = state.ActiveExecutions.Remove(action.RequestId);
+        
+        // Update pipeline statistics
+        var newStatistics = state.Statistics with
+        {
+            TotalExecutions = state.Statistics.TotalExecutions + 1,
+            SuccessfulExecutions = action.Result != null
+                ? state.Statistics.SuccessfulExecutions + 1
+                : state.Statistics.SuccessfulExecutions,
+            AveragePipelineTime = CalculateNewAverage(
+                state.Statistics.AveragePipelineTime,
+                state.Statistics.TotalExecutions,
+                action.TotalExecutionTime.TotalMilliseconds
             )
         };
         
-        return UpdateResult<TranslationState>.StateOnly(state with
+        var effects = new List<IEffect>
         {
-            PendingTranslations = newPending,
-            TranslationCache = newCache,
-            IsTranslating = newPending.Any(),
-            Statistics = stats
-        });
+            // Publish pipeline completion event
+            new PublishPipelineCompletedEffect(
+                action.RequestId,
+                action.Result,
+                action.TotalExecutionTime,
+                execution.ExecutedHandlers
+            )
+        };
+
+        // If translation successful, publish the translated message event
+        if (action.Result != null)
+        {
+            effects.Add(new PublishTranslatedMessageEffect(
+                execution.Context.OriginalMessage,
+                action.Result
+            ));
+        }
+        
+        return UpdateResult<TranslationState>.WithEffects(
+            state with
+            {
+                ActiveExecutions = newExecutions,
+                Statistics = newStatistics
+            },
+            effects.ToArray()
+        );
     }
     
-    private static UpdateResult<TranslationState> HandleTranslationFailed(
+    private static UpdateResult<TranslationState> HandlePipelineFailed(
         TranslationState state,
-        TranslationFailedAction action)
+        PipelineFailedAction action)
     {
-        // Remove from pending
-        var newPending = state.PendingTranslations
-            .RemoveAll(r => r.Id == action.Request.Id);
-        
-        // Update statistics
-        var stats = state.Statistics with
+        if (!state.ActiveExecutions.TryGetValue(action.RequestId, out var execution))
         {
-            FailedTranslations = state.Statistics.FailedTranslations + 1
+            return UpdateResult<TranslationState>.NoChange(state);
+        }
+        
+        var newExecutions = state.ActiveExecutions.Remove(action.RequestId);
+        
+        // Update pipeline statistics
+        var newStatistics = state.Statistics with
+        {
+            TotalExecutions = state.Statistics.TotalExecutions + 1,
+            FailedExecutions = state.Statistics.FailedExecutions + 1
         };
         
+        return UpdateResult<TranslationState>.WithEffects(
+            state with
+            {
+                ActiveExecutions = newExecutions,
+                Statistics = newStatistics
+            },
+            new PublishTranslationErrorEffect(
+                execution.Context.OriginalMessage,
+                action.Error
+            )
+        );
+    }
+    
+    private static UpdateResult<TranslationState> HandleResetStatistics(TranslationState state)
+    {
         return UpdateResult<TranslationState>.StateOnly(state with
         {
-            PendingTranslations = newPending,
-            IsTranslating = newPending.Any(),
-            Statistics = stats
+            Statistics = new PipelineStatistics()
         });
     }
     
-    private static UpdateResult<TranslationState> HandleClearCache(TranslationState state)
-    {
-        return UpdateResult<TranslationState>.StateOnly(state with
-        {
-            TranslationCache = ImmutableDictionary<string, TranslationResult>.Empty
-        });
-    }
-    
-    private static UpdateResult<TranslationState> HandleUpdateCacheSettings(
-        TranslationState state,
-        UpdateCacheSettingsAction action)
-    {
-        // If the cache is disabled, clear it
-        if (!action.EnableCache)
-        {
-            return UpdateResult<TranslationState>.StateOnly(state with
-            {
-                TranslationCache = ImmutableDictionary<string, TranslationResult>.Empty
-            });
-        }
-        
-        // If cache size reduced, trim cache
-        // WARNING: This keeps arbitrary items, not necessarily the most recent
-        if (action.CacheSize < state.TranslationCache.Count)
-        {
-            var newCache = state.TranslationCache
-                .Take(action.CacheSize)
-                .ToImmutableDictionary();
-            
-            return UpdateResult<TranslationState>.StateOnly(state with
-            {
-                TranslationCache = newCache
-            });
-        }
-        
-        return UpdateResult<TranslationState>.NoChange(state);
-    }
-    
-    private static string GenerateCacheKey(Chat.Models.ChatMessage message)
-    {
-        // Simple cache key based on message text
-        // Could be enhanced to include language settings
-        return $"{message.Type}:{message.Message}";
-    }
+    // --- Helper Methods ---
     
     private static double CalculateNewAverage(double currentAvg, int count, double newValue)
     {
