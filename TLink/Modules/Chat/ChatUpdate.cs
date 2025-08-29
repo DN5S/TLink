@@ -1,7 +1,5 @@
-using System;
 using System.Collections.Immutable;
 using System.Linq;
-using Dalamud.Game.Text;
 using TLink.Core.MVU;
 using TLink.Modules.Chat.Models;
 
@@ -13,135 +11,57 @@ public static class ChatUpdate
     {
         return action switch
         {
-            AddMessageAction addMsg => HandleAddMessage(state, addMsg),
-            SetFilterAction setFilter => HandleSetFilter(state, setFilter),
-            ToggleChannelAction toggleChannel => HandleToggleChannel(state, toggleChannel),
-            ClearMessagesAction => HandleClearMessages(state),
-            UpdateMaxMessagesAction updateMax => HandleUpdateMaxMessages(state, updateMax),
-            UpdateAutoScrollAction updateScroll => HandleUpdateAutoScroll(state, updateScroll),
-            UpdateShowTimestampsAction updateTimestamps => HandleUpdateShowTimestamps(state, updateTimestamps),
-            ResetChannelFiltersAction => HandleResetChannelFilters(state),
+            ToggleTranslatableChannelAction toggleChannel => HandleToggleTranslatableChannel(state, toggleChannel),
+            SetTranslatableChannelsAction setChannels => HandleSetTranslatableChannels(state, setChannels),
+            ResetTranslatableChannelsAction => HandleResetTranslatableChannels(state),
             LoadConfigurationAction loadConfig => HandleLoadConfiguration(state, loadConfig),
             _ => UpdateResult<ChatState>.NoChange(state)
         };
     }
     
-    private static UpdateResult<ChatState> HandleAddMessage(ChatState state, AddMessageAction action)
+    private static UpdateResult<ChatState> HandleToggleTranslatableChannel(ChatState state, ToggleTranslatableChannelAction action)
     {
-        var messages = state.Messages.Add(action.Message);
-        
-        if (messages.Count > state.MaxMessages)
-        {
-            messages = messages.RemoveRange(0, messages.Count - state.MaxMessages);
-        }
-        
-        return UpdateResult<ChatState>.StateOnly(state with { Messages = messages });
-    }
-    
-    private static UpdateResult<ChatState> HandleSetFilter(ChatState state, SetFilterAction action)
-    {
-        return state.Filter == action.FilterText ? UpdateResult<ChatState>.NoChange(state) :
-                   UpdateResult<ChatState>.StateOnly(state with { Filter = action.FilterText });
-    }
-    
-    private static UpdateResult<ChatState> HandleToggleChannel(ChatState state, ToggleChannelAction action)
-    {
-        var channels = state.EnabledChannels.Contains(action.Channel)
-            ? state.EnabledChannels.Remove(action.Channel)
-            : state.EnabledChannels.Add(action.Channel);
+        var channels = state.TranslatableChannels.Contains(action.Channel)
+            ? state.TranslatableChannels.Remove(action.Channel)
+            : state.TranslatableChannels.Add(action.Channel);
             
-        var newState = state with { EnabledChannels = channels };
+        var newState = state with { TranslatableChannels = channels };
         var config = CreateConfigurationFromState(newState);
         
         return UpdateResult<ChatState>.WithEffects(
             newState,
-            new SaveConfigurationEffect(config),
-            new NotifyConfigurationChangedEffect(config)
+            new SaveConfigurationEffect(config)
         );
     }
     
-    private static UpdateResult<ChatState> HandleClearMessages(ChatState state)
+    private static UpdateResult<ChatState> HandleSetTranslatableChannels(ChatState state, SetTranslatableChannelsAction action)
     {
-        return UpdateResult<ChatState>.StateOnly(state with { Messages = ImmutableList<ChatMessage>.Empty });
-    }
-    
-    private static UpdateResult<ChatState> HandleUpdateMaxMessages(ChatState state, UpdateMaxMessagesAction action)
-    {
-        var maxMessages = Math.Clamp(action.MaxMessages, 100, 10000);
-        if (state.MaxMessages == maxMessages)
-            return UpdateResult<ChatState>.NoChange(state);
-        
-        var messages = state.Messages;
-        if (messages.Count > maxMessages)
-        {
-            messages = messages.RemoveRange(0, messages.Count - maxMessages);
-        }
-        
-        var newState = state with 
-        { 
-            MaxMessages = maxMessages,
-            Messages = messages
-        };
-        
-        var config = CreateConfigurationFromState(newState);
-        
-        return UpdateResult<ChatState>.WithEffects(
-            newState,
-            new SaveConfigurationEffect(config),
-            new NotifyConfigurationChangedEffect(config)
-        );
-    }
-    
-    private static UpdateResult<ChatState> HandleUpdateAutoScroll(ChatState state, UpdateAutoScrollAction action)
-    {
-        if (state.AutoScroll == action.AutoScroll)
+        var channels = action.Channels.ToImmutableHashSet();
+        if (state.TranslatableChannels.SetEquals(channels))
             return UpdateResult<ChatState>.NoChange(state);
             
-        var newState = state with { AutoScroll = action.AutoScroll };
+        var newState = state with { TranslatableChannels = channels };
         var config = CreateConfigurationFromState(newState);
         
         return UpdateResult<ChatState>.WithEffects(
             newState,
-            new SaveConfigurationEffect(config),
-            new NotifyConfigurationChangedEffect(config)
+            new SaveConfigurationEffect(config)
         );
     }
     
-    private static UpdateResult<ChatState> HandleUpdateShowTimestamps(ChatState state, UpdateShowTimestampsAction action)
+    private static UpdateResult<ChatState> HandleResetTranslatableChannels(ChatState state)
     {
-        if (state.ShowTimestamps == action.ShowTimestamps)
+        var defaultChannels = ChatModuleConfiguration.GetDefaultTranslatableChannels().ToImmutableHashSet();
+        
+        if (state.TranslatableChannels.SetEquals(defaultChannels))
             return UpdateResult<ChatState>.NoChange(state);
             
-        var newState = state with { ShowTimestamps = action.ShowTimestamps };
+        var newState = state with { TranslatableChannels = defaultChannels };
         var config = CreateConfigurationFromState(newState);
         
         return UpdateResult<ChatState>.WithEffects(
             newState,
-            new SaveConfigurationEffect(config),
-            new NotifyConfigurationChangedEffect(config)
-        );
-    }
-    
-    private static UpdateResult<ChatState> HandleResetChannelFilters(ChatState state)
-    {
-        var defaultChannels = ImmutableHashSet.Create(
-            XivChatType.Say,
-            XivChatType.Shout,
-            XivChatType.Party,
-            XivChatType.Alliance,
-            XivChatType.FreeCompany
-        );
-        
-        if (state.EnabledChannels.SetEquals(defaultChannels))
-            return UpdateResult<ChatState>.NoChange(state);
-            
-        var newState = state with { EnabledChannels = defaultChannels };
-        var config = CreateConfigurationFromState(newState);
-        
-        return UpdateResult<ChatState>.WithEffects(
-            newState,
-            new SaveConfigurationEffect(config),
-            new NotifyConfigurationChangedEffect(config)
+            new SaveConfigurationEffect(config)
         );
     }
     
@@ -149,19 +69,9 @@ public static class ChatUpdate
     {
         var config = action.Configuration;
         
-        var messages = state.Messages;
-        if (messages.Count > config.MaxMessages)
-        {
-            messages = messages.RemoveRange(0, messages.Count - config.MaxMessages);
-        }
-        
         return UpdateResult<ChatState>.StateOnly(state with
         {
-            EnabledChannels = config.EnabledChannels.ToImmutableHashSet(),
-            MaxMessages = config.MaxMessages,
-            AutoScroll = config.AutoScroll,
-            ShowTimestamps = config.ShowTimestamps,
-            Messages = messages
+            TranslatableChannels = config.TranslatableChannels.ToImmutableHashSet()
         });
     }
     
@@ -170,10 +80,7 @@ public static class ChatUpdate
         return new ChatModuleConfiguration
         {
             ModuleName = "Chat",
-            EnabledChannels = state.EnabledChannels.ToHashSet(),
-            MaxMessages = state.MaxMessages,
-            AutoScroll = state.AutoScroll,
-            ShowTimestamps = state.ShowTimestamps
+            TranslatableChannels = state.TranslatableChannels.ToHashSet()
         };
     }
 }

@@ -9,17 +9,16 @@ using TLink.Modules.Chat.Models;
 
 namespace TLink.Modules.Chat;
 
-[ModuleInfo("Chat", "1.0.0", Description = "Chat monitoring module", Author = "DN5S")]
+[ModuleInfo("Chat", "2.0.0", Description = "Chat selector for translation", Author = "DN5S")]
 public class ChatModule : ModuleBase
 {
-    private ChatWindow? window;
     private ChatViewModel? viewModel;
     private Store<ChatState>? store;
     private IChatGui? chatGui;
     private ChatModuleConfiguration? moduleConfig;
     
     public override string Name => "Chat";
-    public override string Version => "1.0.0";
+    public override string Version => "2.0.0";
     
     public override void RegisterServices(IServiceCollection services)
     {
@@ -29,7 +28,6 @@ public class ChatModule : ModuleBase
             store = new Store<ChatState>(initialState, ChatUpdate.Update);
             
             store.RegisterEffectHandler(new SaveConfigurationEffectHandler(SetModuleConfig));
-            store.RegisterEffectHandler(new NotifyConfigurationChangedEffectHandler(EventBus));
 
             store.UseMiddleware(async (state, action, next) =>
             {
@@ -55,9 +53,10 @@ public class ChatModule : ModuleBase
         store = (Store<ChatState>)Services.GetRequiredService<IStore<ChatState>>();
         viewModel = Services.GetRequiredService<ChatViewModel>();
         
-        store.Dispatch(new LoadConfigurationAction(moduleConfig!));
+        // Initialize viewModel with store
+        viewModel.Initialize(store);
         
-        window = new ChatWindow(viewModel);
+        store.Dispatch(new LoadConfigurationAction(moduleConfig!));
         
         chatGui.ChatMessage += OnChatMessage;
         
@@ -76,19 +75,24 @@ public class ChatModule : ModuleBase
             SeStringMessage = new SeString(message.Payloads)
         };
         
-        store?.Dispatch(new AddMessageAction(chatMessage));
+        // Check if this message type should be translated
+        if (store?.State.TranslatableChannels.Contains(type) == true)
+        {
+            EventBus.Publish(new TranslatableMessageReceived(chatMessage));
+        }
         
+        // Still publish the general event for other modules that might need it
         EventBus.Publish(new ChatMessageReceived(chatMessage));
     }
     
     public override void DrawUI()
     {
-        window?.Draw();
+        // No standalone UI for simplified Chat module
     }
     
     public override void DrawConfiguration()
     {
-        window?.DrawConfiguration();
+        viewModel?.DrawConfigurationUI();
     }
     
     public override void Dispose()
@@ -98,7 +102,6 @@ public class ChatModule : ModuleBase
             chatGui.ChatMessage -= OnChatMessage;
         }
         
-        window?.Dispose();
         viewModel?.Dispose();
         store?.Dispose();
         base.Dispose();

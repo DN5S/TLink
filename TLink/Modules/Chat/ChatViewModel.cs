@@ -1,9 +1,7 @@
 using System;
-using System.Collections.ObjectModel;
-using System.Linq;
-using System.Reactive.Linq;
-using System.Reactive.Subjects;
+using Dalamud.Bindings.ImGui;
 using Dalamud.Game.Text;
+using Dalamud.Interface.Utility.Raii;
 using TLink.Core.MVU;
 using TLink.Modules.Chat.Models;
 
@@ -11,71 +9,85 @@ namespace TLink.Modules.Chat;
 
 public class ChatViewModel : IDisposable
 {
-    private readonly IStore<ChatState> store;
-    private readonly BehaviorSubject<string> filterSubject = new(string.Empty);
+    private IStore<ChatState>? store;
     private IDisposable? stateSubscription;
-    private IDisposable? filterSubscription;
     
-    public ObservableCollection<ChatMessage> Messages { get; } = [];
-
-    public IObservable<string> Filter => filterSubject.AsObservable();
-    
-    public int MaxMessages => store.State.MaxMessages;
-    public bool AutoScroll => store.State.AutoScroll;
-    public bool ShowTimestamps => store.State.ShowTimestamps;
-    public bool IsChannelEnabled(XivChatType channel) => store.State.EnabledChannels.Contains(channel);
-    
-    public ChatViewModel(IStore<ChatState> chatStore)
+    public void Initialize(IStore<ChatState> chatStore)
     {
         store = chatStore;
+        stateSubscription = store.StateChanged.Subscribe(_ => { /* State change tracking if needed */ });
+    }
+    
+    public void DrawConfigurationUI()
+    {
+        if (store == null) return;
         
-        stateSubscription = store.StateChanged
-            .Subscribe(OnStateChanged);
-            
-        filterSubscription = filterSubject
-            .Throttle(TimeSpan.FromMilliseconds(300))
-            .Subscribe(filter => store.Dispatch(new SetFilterAction(filter)));
-            
-        UpdateMessages(store.State);
-    }
-    
-    public void ProcessAction(IAction action)
-    {
-        if (action is SetFilterAction setFilter)
+        ImGui.Text("Select channels to translate:");
+        ImGui.Spacing();
+        
+        // Group channels by category for better organization
+        DrawChannelCategory("Combat", XivChatType.Say, XivChatType.Yell, XivChatType.Shout);
+        DrawChannelCategory("Party", XivChatType.Party, XivChatType.Alliance);
+        DrawChannelCategory("Social", XivChatType.FreeCompany, XivChatType.Ls1, XivChatType.Ls2, XivChatType.Ls3, XivChatType.Ls4, XivChatType.Ls5, XivChatType.Ls6, XivChatType.Ls7, XivChatType.Ls8);
+        DrawChannelCategory("Cross-world", XivChatType.CrossLinkShell1, XivChatType.CrossLinkShell2, XivChatType.CrossLinkShell3, XivChatType.CrossLinkShell4, XivChatType.CrossLinkShell5, XivChatType.CrossLinkShell6, XivChatType.CrossLinkShell7, XivChatType.CrossLinkShell8);
+        DrawChannelCategory("Private", XivChatType.TellIncoming, XivChatType.TellOutgoing);
+        DrawChannelCategory("NPC", XivChatType.NPCDialogue, XivChatType.NPCDialogueAnnouncements);
+        
+        ImGui.Spacing();
+        ImGui.Separator();
+        ImGui.Spacing();
+        
+        if (ImGui.Button("Reset to Defaults"))
         {
-            filterSubject.OnNext(setFilter.FilterText);
+            store.Dispatch(new ResetTranslatableChannelsAction());
         }
-        else
+    }
+    
+    private void DrawChannelCategory(string categoryName, params XivChatType[] channels)
+    {
+        if (store == null) return;
+
+        using var node = ImRaii.TreeNode(categoryName);
+        if (node.Success)
         {
-            store.Dispatch(action);
+            foreach (var channel in channels)
+            {
+                var isEnabled = store.State.TranslatableChannels.Contains(channel);
+                if (ImGui.Checkbox($"##{categoryName}_{channel}", ref isEnabled))
+                {
+                    store.Dispatch(new ToggleTranslatableChannelAction(channel));
+                }
+                ImGui.SameLine();
+                ImGui.Text(GetChannelDisplayName(channel));
+            }
         }
     }
     
-    public void SetFilter(string filter)
+    private static string GetChannelDisplayName(XivChatType channel)
     {
-        filterSubject.OnNext(filter);
-    }
-    
-    private void OnStateChanged(ChatState state)
-    {
-        UpdateMessages(state);
-    }
-    
-    private void UpdateMessages(ChatState state)
-    {
-        Messages.Clear();
-        var messagesToDisplay = state.FilteredMessages.TakeLast(state.MaxMessages);
-        foreach (var message in messagesToDisplay)
+        return channel switch
         {
-            Messages.Add(message);
-        }
+            XivChatType.Say => "Say",
+            XivChatType.Yell => "Yell",
+            XivChatType.Shout => "Shout",
+            XivChatType.Party => "Party",
+            XivChatType.Alliance => "Alliance",
+            XivChatType.FreeCompany => "Free Company",
+            XivChatType.TellIncoming => "Tell (Incoming)",
+            XivChatType.TellOutgoing => "Tell (Outgoing)",
+            XivChatType.NPCDialogue => "NPC Dialogue",
+            XivChatType.NPCDialogueAnnouncements => "NPC Announcements",
+            >= XivChatType.Ls1 and <= XivChatType.Ls8 => 
+                $"LS-{(int)channel - (int)XivChatType.Ls1 + 1}",
+            >= XivChatType.CrossLinkShell1 and <= XivChatType.CrossLinkShell8 => 
+                $"CWLS-{(int)channel - (int)XivChatType.CrossLinkShell1 + 1}",
+            _ => channel.ToString()
+        };
     }
     
     public void Dispose()
     {
         stateSubscription?.Dispose();
-        filterSubscription?.Dispose();
-        filterSubject.Dispose();
         GC.SuppressFinalize(this);
     }
 }

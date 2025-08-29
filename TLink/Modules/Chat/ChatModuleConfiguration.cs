@@ -8,18 +8,15 @@ namespace TLink.Modules.Chat;
 [Serializable]
 public class ChatModuleConfiguration : ModuleConfiguration
 {
-    public int MaxMessages { get; set; } = 1000;
-    public bool ShowTimestamps { get; set; } = true;
-    public bool AutoScroll { get; set; } = true;
-    public HashSet<XivChatType> EnabledChannels { get; set; }
+    public HashSet<XivChatType> TranslatableChannels { get; set; }
     
     public ChatModuleConfiguration()
     {
         ModuleName = "Chat";
-        EnabledChannels = GetDefaultChannels();
+        TranslatableChannels = GetDefaultTranslatableChannels();
     }
     
-    public static HashSet<XivChatType> GetDefaultChannels()
+    public static HashSet<XivChatType> GetDefaultTranslatableChannels()
     {
         return
         [
@@ -39,6 +36,6 @@ public class ChatModuleConfiguration : ModuleConfiguration
     
     public void ResetChannels()
     {
-        EnabledChannels = GetDefaultChannels();
+        TranslatableChannels = GetDefaultTranslatableChannels();
     }
 }
