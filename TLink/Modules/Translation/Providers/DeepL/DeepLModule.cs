@@ -18,6 +18,7 @@ public class DeepLModule : ModuleBase
 {
     private DeepLConfig? moduleConfig;
     private DeepLPipelineHandler? pipelineHandler;
+    private IFramework? framework;
     
     // API key validation state management
     private enum ApiKeyStatus { Idle, Validating, Valid, Invalid }
@@ -61,6 +62,7 @@ public class DeepLModule : ModuleBase
     // 3. Get required services through dependency injection
     public override void Initialize()
     {
+        framework = Services.GetRequiredService<IFramework>();
         var handlerRegistry = Services.GetRequiredService<IPipelineHandlerRegistry>();
         pipelineHandler = Services.GetRequiredService<DeepLPipelineHandler>();
         
@@ -95,7 +97,7 @@ public class DeepLModule : ModuleBase
         // Cancel any previous validation timer
         validationDebounceTimer?.Dispose();
         
-        // If key is empty, return to idle state
+        // If the key is empty, return to the idle state
         if (string.IsNullOrWhiteSpace(apiKey))
         {
             currentApiKeyStatus = ApiKeyStatus.Idle;
@@ -128,15 +130,22 @@ public class DeepLModule : ModuleBase
             using var apiClient = new DeepLApiClient(tempConfig, Logger);
             var isValid = await apiClient.ValidateApiKeyAsync();
             
-            // Update validation state
-            currentApiKeyStatus = isValid ? ApiKeyStatus.Valid : ApiKeyStatus.Invalid;
-            lastValidatedApiKey = apiKey;
+            // Update the validation state on the main thread to avoid deadlock
+            framework?.RunOnFrameworkThread(() =>
+            {
+                currentApiKeyStatus = isValid ? ApiKeyStatus.Valid : ApiKeyStatus.Invalid;
+                lastValidatedApiKey = apiKey;
+            });
         }
         catch (Exception ex)
         {
             Logger.Error($"Error validating API key: {ex.Message}");
-            currentApiKeyStatus = ApiKeyStatus.Invalid;
-            lastValidatedApiKey = apiKey;
+            // Update state on the main thread to avoid deadlock
+            framework?.RunOnFrameworkThread(() =>
+            {
+                currentApiKeyStatus = ApiKeyStatus.Invalid;
+                lastValidatedApiKey = apiKey;
+            });
         }
     }
     
