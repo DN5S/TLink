@@ -1,80 +1,106 @@
 using System;
 using System.Collections.Generic;
 using System.Text.Json;
+using System.Text.Json.Serialization;
+using System.Text.Json.Serialization.Metadata;
 using Dalamud.Configuration;
 using Dalamud.Plugin;
 
 namespace TLink.Core.Configuration;
 
 [Serializable]
-public class PluginConfiguration : IPluginConfiguration, IConfiguration
+public class PluginConfiguration : IPluginConfiguration
 {
     public int Version { get; set; } = 1;
     
-    private Dictionary<string, JsonElement> settings = new();
+    // Store configurations as JSON string for proper serialization
+    public string ModuleConfigsJson { get; set; } = "{}";
+    
+    // Runtime-only container for actual configuration objects
+    [JsonIgnore]
+    internal Dictionary<string, ModuleConfiguration> ModuleConfigs { get; private set; } = new();
+    
+    [JsonIgnore]
     private IDalamudPluginInterface? pluginInterface;
     
-    public void Initialize(IDalamudPluginInterface dalamudPluginInterface)
+    [JsonIgnore]
+    private IJsonTypeInfoResolver? typeResolver;
+    
+    public void Initialize(IDalamudPluginInterface dalamudPluginInterface, IJsonTypeInfoResolver resolver)
     {
         this.pluginInterface = dalamudPluginInterface;
+        this.typeResolver = resolver;
         Load();
-    }
-    
-    public T Get<T>(string key, T defaultValue = default!)
-    {
-        if (!settings.TryGetValue(key, out var element))
-            return defaultValue;
-        
-        try
-        {
-            var json = element.GetRawText();
-            var result = JsonSerializer.Deserialize<T>(json);
-            return result ?? defaultValue;
-        }
-        catch
-        {
-            return defaultValue;
-        }
-    }
-    
-    public void Set<T>(string key, T value)
-    {
-        var json = JsonSerializer.Serialize(value);
-        settings[key] = JsonDocument.Parse(json).RootElement.Clone();
     }
     
     public void Save()
     {
+        if (typeResolver != null)
+        {
+            var options = new JsonSerializerOptions 
+            { 
+                TypeInfoResolver = typeResolver,
+                WriteIndented = true 
+            };
+            ModuleConfigsJson = JsonSerializer.Serialize(ModuleConfigs, options);
+        }
         pluginInterface?.SavePluginConfig(this);
     }
     
     public void Load()
     {
         var config = pluginInterface?.GetPluginConfig();
-        if (config is PluginConfiguration pluginConfig)
+        if (config is PluginConfiguration pluginConfig && !string.IsNullOrEmpty(pluginConfig.ModuleConfigsJson))
         {
-            settings = pluginConfig.settings;
             Version = pluginConfig.Version;
+            if (typeResolver != null)
+            {
+                var options = new JsonSerializerOptions { TypeInfoResolver = typeResolver };
+                try
+                {
+                    ModuleConfigs = JsonSerializer.Deserialize<Dictionary<string, ModuleConfiguration>>(
+                        pluginConfig.ModuleConfigsJson, options) ?? new Dictionary<string, ModuleConfiguration>();
+                }
+                catch
+                {
+                    ModuleConfigs = new();
+                }
+            }
         }
     }
     
     public void Reset()
     {
-        settings.Clear();
+        ModuleConfigs.Clear();
+        ModuleConfigsJson = "{}";
         Save();
     }
     
     // Module-specific configuration helpers
-    public ModuleConfiguration GetModuleConfig(string moduleName)
+    public T GetModuleConfig<T>(string moduleName) where T : ModuleConfiguration, new()
     {
         var key = $"Module.{moduleName}";
-        return Get(key, new ModuleConfiguration { ModuleName = moduleName });
+        if (ModuleConfigs.TryGetValue(key, out var config) && config is T typedConfig)
+        {
+            return typedConfig;
+        }
+        
+        // Create a new config and add to dictionary to prevent orphaned objects
+        var newConfig = new T { ModuleName = moduleName };
+        ModuleConfigs[key] = newConfig;
+        return newConfig;
+    }
+    
+    // Non-generic overload for backward compatibility
+    public ModuleConfiguration GetModuleConfig(string moduleName)
+    {
+        return GetModuleConfig<ModuleConfiguration>(moduleName);
     }
     
     public void SetModuleConfig(string moduleName, ModuleConfiguration config)
     {
         var key = $"Module.{moduleName}";
-        Set(key, config);
+        ModuleConfigs[key] = config;
     }
     
     /// <summary>
@@ -83,28 +109,14 @@ public class PluginConfiguration : IPluginConfiguration, IConfiguration
     public Dictionary<string, ModuleConfiguration> GetAllModuleConfigs()
     {
         var configs = new Dictionary<string, ModuleConfiguration>();
-        
-        foreach (var kvp in settings)
+        foreach (var kvp in ModuleConfigs)
         {
             if (kvp.Key.StartsWith("Module."))
             {
                 var moduleName = kvp.Key[7..]; // Remove "Module." prefix
-                try
-                {
-                    var json = kvp.Value.GetRawText();
-                    var config = JsonSerializer.Deserialize<ModuleConfiguration>(json);
-                    if (config != null)
-                    {
-                        configs[moduleName] = config;
-                    }
-                }
-                catch
-                {
-                    // Skip invalid configs
-                }
+                configs[moduleName] = kvp.Value;
             }
         }
-        
         return configs;
     }
     
@@ -114,36 +126,13 @@ public class PluginConfiguration : IPluginConfiguration, IConfiguration
     public void RemoveModuleConfig(string moduleName)
     {
         var key = $"Module.{moduleName}";
-        settings.Remove(key);
+        ModuleConfigs.Remove(key);
     }
 }
 
+// Pure base class for module configurations
 public class ModuleConfiguration
 {
     public string ModuleName { get; set; } = string.Empty;
     public bool IsEnabled { get; set; } = true;
-    public Dictionary<string, JsonElement> Settings { get; set; } = new();
-    
-    public T GetSetting<T>(string key, T defaultValue = default!)
-    {
-        if (!Settings.TryGetValue(key, out var element))
-            return defaultValue;
-        
-        try
-        {
-            var json = element.GetRawText();
-            var result = JsonSerializer.Deserialize<T>(json);
-            return result ?? defaultValue;
-        }
-        catch
-        {
-            return defaultValue;
-        }
-    }
-    
-    public void SetSetting<T>(string key, T value)
-    {
-        var json = JsonSerializer.Serialize(value);
-        Settings[key] = JsonDocument.Parse(json).RootElement.Clone();
-    }
 }
