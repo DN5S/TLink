@@ -10,7 +10,6 @@ using TLink.Modules.Translation.Models;
 using TLink.Modules.Translation.MVU;
 using TLink.Modules.Translation.Services;
 using TLink.Modules.Translation.UI;
-using TLink.Utils;
 
 namespace TLink.Modules.Translation;
 
@@ -42,14 +41,16 @@ public class TranslationModule : ModuleBase, IPipelineHandlerRegistry
     
     public override void RegisterServices(IServiceCollection services)
     {
-        services.AddSingleton(moduleConfig!);
-        
-        services.AddSingleton<IStore<TranslationState>>(provider => new Store<TranslationState>(
+        services.AddSingleton<IStore<TranslationState>>(_ => new Store<TranslationState>(
             TranslationState.Initial,
             TranslationUpdate.Update
         ));
         
         services.AddSingleton<TranslationViewModel>();
+    }
+    
+    public override void RegisterSharedServices(IServiceCollection services)
+    {
         services.AddSingleton<IPipelineHandlerRegistry>(_ => this);
     }
     
@@ -89,8 +90,6 @@ public class TranslationModule : ModuleBase, IPipelineHandlerRegistry
         
         Logger.Information("Translation orchestrator initialized");
     }
-    
-    // --- IPipelineHandlerRegistry Implementation ---
     
     public void RegisterHandler(ITranslationPipelineHandler handler)
     {

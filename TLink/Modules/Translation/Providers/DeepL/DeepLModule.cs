@@ -1,9 +1,11 @@
 using System;
 using Dalamud.Interface.Components;
+using Dalamud.Plugin.Services;
 using Microsoft.Extensions.DependencyInjection;
 using Dalamud.Bindings.ImGui;
 using TLink.Core.Module;
 using TLink.Modules.Translation.Services;
+using TLink.Utils;
 
 namespace TLink.Modules.Translation.Providers.DeepL;
 
@@ -23,12 +25,27 @@ public class DeepLModule : ModuleBase
         moduleConfig = GetModuleConfig<DeepLConfig>();
     }
     
-    // 2. Delegate dependency creation to a DI container
+    // 2. Delegate dependency creation to a DI container using a factory pattern
     public override void RegisterServices(IServiceCollection services)
     {
-        services.AddSingleton(moduleConfig!);
-        services.AddSingleton<DeepLApiClient>();
-        services.AddSingleton<DeepLPipelineHandler>();
+        // Do NOT register moduleConfig - it's null at this point
+        // Use a factory pattern to defer creation until Initialize phase
+        
+        services.AddSingleton<DeepLApiClient>(provider => 
+            new DeepLApiClient(
+                this.moduleConfig!, 
+                provider.GetRequiredService<IPluginLog>()
+            )
+        );
+        
+        services.AddSingleton<DeepLPipelineHandler>(provider =>
+            new DeepLPipelineHandler(
+                provider.GetRequiredService<DeepLApiClient>(),
+                this.moduleConfig!,
+                provider.GetRequiredService<IPluginLog>(),
+                provider.GetRequiredService<SeStringProcessor>()
+            )
+        );
     }
     
     // 3. Get required services through dependency injection

@@ -10,6 +10,7 @@ public interface IModule : IDisposable
     string[] Dependencies { get; }
     
     void RegisterServices(IServiceCollection services);
+    void RegisterSharedServices(IServiceCollection services);
     void Initialize();
     void DrawUI();
     void DrawConfiguration();

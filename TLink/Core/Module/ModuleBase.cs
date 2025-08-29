@@ -22,7 +22,11 @@ public abstract class ModuleBase : IModule
     public virtual string[] Dependencies => [];
     
     public abstract void RegisterServices(IServiceCollection services);
-    
+
+    public virtual void RegisterSharedServices(IServiceCollection services)
+    {
+    }
+
     public virtual void Initialize()
     {
     }

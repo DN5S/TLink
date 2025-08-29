@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Linq;
 using Dalamud.Plugin.Services;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 using TLink.Core.Configuration;
 
 namespace TLink.Core.Module;
@@ -11,6 +12,7 @@ public class ModuleManager(IServiceProvider globalServices, IPluginLog logger) :
 {
     private readonly List<IModule> modules = [];
     private readonly Dictionary<string, IServiceProvider> moduleServices = new();
+    private readonly ServiceCollection sharedServices = new();
     private ModuleRegistry? registry;
     
     public IReadOnlyList<IModule> LoadedModules => modules.AsReadOnly();
@@ -43,14 +45,25 @@ public class ModuleManager(IServiceProvider globalServices, IPluginLog logger) :
                 }
             }
             
+            // Step 1: Register shared services from this module to the central collection
+            module.RegisterSharedServices(sharedServices);
+            
+            // Step 2: Create a service collection for this module
             var services = new ServiceCollection();
             
-            // Use the extension method to register all standard services
+            // Step 3: Add all standard services
             services.AddModuleServices(globalServices);
             
-            // Let the module register its own specific services
+            // Step 4: Add all shared services from previously loaded modules
+            foreach (var descriptor in sharedServices)
+            {
+                services.TryAdd(descriptor);
+            }
+            
+            // Step 5: Let the module register its own specific services
             module.RegisterServices(services);
             
+            // Step 6: Build the service provider
             var moduleProvider = services.BuildServiceProvider();
             moduleServices[module.Name] = moduleProvider;
             
