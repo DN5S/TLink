@@ -74,9 +74,9 @@ public class TranslationModule : ModuleBase, IPipelineHandlerRegistry
             SetModuleConfig(moduleConfig!);
         });
         
-        // Subscribe to chat messages and execute a pipeline for each
+        // Subscribe to translatable messages and execute a pipeline for each
         Subscriptions.Add(
-            EventBus.Listen<ChatMessageReceived>()
+            EventBus.Listen<TranslatableMessageReceived>()
                 .Subscribe(msg =>
                 {
                     // Execute the pipeline for each message

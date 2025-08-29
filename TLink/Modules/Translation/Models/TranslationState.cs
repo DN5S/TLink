@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Collections.Immutable;
+using Dalamud.Game.Text.SeStringHandling;
 using TLink.Core.MVU;
 using TLink.Modules.Translation.Services;
 
@@ -63,8 +64,10 @@ public record HandlerStatistics(
 
 
 public record TranslationResult(
-    string OriginalText,
     string TranslatedText,
-    bool FormattingPreserved,
+    SeString TranslatedSeString,
+    string? DetectedLanguage,
+    string TranslatedBy,
+    bool FromCache,
     TimeSpan TranslationTime
 );

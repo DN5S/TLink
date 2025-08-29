@@ -15,13 +15,8 @@ public class DeepLConfig : ModuleConfiguration
     public int MaxRetries { get; set; } = 3;
     
     public int TimeoutMs { get; set; } = 10000;
-
-    /// <summary>
-    /// DeepL-handler-specific enabled state.
-    /// Different from base ModuleConfiguration.IsEnabled which controls module loading.
-    /// This controls whether the DeepL handler participates in the pipeline when loaded.
-    /// </summary>
-    public new bool IsEnabled { get; set; }
+    
+    public bool Enabled { get; set; }
     
     public DeepLConfig()
     {

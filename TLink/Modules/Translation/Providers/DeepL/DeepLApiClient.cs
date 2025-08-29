@@ -57,14 +57,14 @@ public class DeepLApiClient : IDisposable
         };
     }
     
-    public async Task<string> TranslateTextAsync(
+    public async Task<(string translatedText, string? detectedLanguage)> TranslateTextAsync(
         string text, 
         string sourceLang, 
         string targetLang,
         CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrWhiteSpace(text))
-            return text;
+            return (text, null);
         
         var request = new DeepLTranslateRequest
         {
@@ -106,7 +106,12 @@ public class DeepLApiClient : IDisposable
                         jsonOptions
                     );
                     
-                    return result?.Translations.FirstOrDefault()?.Text ?? text;
+                    var translation = result?.Translations.FirstOrDefault();
+                    if (translation != null)
+                    {
+                        return (translation.Text, translation.DetectedSourceLanguage);
+                    }
+                    return (text, null);
                 }
                 
                 if ((int)response.StatusCode >= 500 && retryCount < config.MaxRetries)

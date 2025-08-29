@@ -209,10 +209,10 @@ public class DeepLModule : ModuleBase
                 break;
         }
 
-        var isEnabled = moduleConfig.IsEnabled;
+        var isEnabled = moduleConfig.Enabled;
         if (ImGui.Checkbox("Enable DeepL Handler", ref isEnabled))
         {
-            moduleConfig.IsEnabled = isEnabled;
+            moduleConfig.Enabled = isEnabled;
             configChanged = true;
         }
         ImGui.SameLine();

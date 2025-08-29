@@ -26,7 +26,7 @@ public class DeepLPipelineHandler(
     
     public string Name => "DeepL Translator";
     
-    public bool IsEnabled => config.IsEnabled && config.IsConfigured();
+    public bool IsEnabled => config.Enabled && config.IsConfigured();
     
     public IReadOnlyList<string> SupportedLanguages => DeepLApiClient.LanguageCodeMap.Keys.ToList();
 
@@ -59,7 +59,7 @@ public class DeepLPipelineHandler(
                 return;
             }
             
-            var translatedXml = await apiClient.TranslateTextAsync(
+            var (translatedXml, detectedLanguage) = await apiClient.TranslateTextAsync(
                 encodedMessage.XmlText,
                 context.SourceLanguage,
                 context.TargetLanguage
@@ -67,14 +67,14 @@ public class DeepLPipelineHandler(
             
             var translatedSeString = seStringProcessor.Decode(translatedXml, encodedMessage.PayloadMap);
             
-            var translatedText = translatedSeString.TextValue;
-            
             stopwatch.Stop();
             
             var result = new TranslationResult(
-                OriginalText: context.OriginalMessage.Message,
-                TranslatedText: translatedText,
-                FormattingPreserved: true,
+                TranslatedText: translatedSeString.TextValue,
+                TranslatedSeString: translatedSeString,
+                DetectedLanguage: detectedLanguage,
+                TranslatedBy: Name,
+                FromCache: false,
                 TranslationTime: stopwatch.Elapsed
             );
             
