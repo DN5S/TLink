@@ -17,6 +17,7 @@ public class TranslationWindow : Window, IDisposable
     private int selectedSourceLangIndex;
     private int selectedTargetLangIndex;
     private string filterText = string.Empty;
+    private bool configChanged;
     
     public TranslationWindow(
         TranslationViewModel viewModel,
@@ -130,8 +131,6 @@ public class TranslationWindow : Window, IDisposable
     
     public void DrawConfiguration()
     {
-        var changed = false;
-        
         // Language Settings
         ImGui.Text("Language Settings");
         ImGui.Separator();
@@ -149,7 +148,7 @@ public class TranslationWindow : Window, IDisposable
             if (selectedSourceLangIndex >= 0 && selectedSourceLangIndex < languages.Length)
             {
                 config.SourceLanguage = languages[selectedSourceLangIndex];
-                changed = true;
+                configChanged = true;
             }
         }
         
@@ -158,7 +157,7 @@ public class TranslationWindow : Window, IDisposable
             if (selectedTargetLangIndex >= 0 && selectedTargetLangIndex < languages.Length)
             {
                 config.TargetLanguage = languages[selectedTargetLangIndex];
-                changed = true;
+                configChanged = true;
             }
         }
         
@@ -172,11 +171,12 @@ public class TranslationWindow : Window, IDisposable
         ImGui.Spacing();
         
         // Save button
-        if (changed)
+        if (configChanged)
         {
             if (ImGui.Button("Save Configuration"))
             {
                 saveConfig.Invoke();
+                configChanged = false; // Reset after saving
             }
             ImGui.SameLine();
             ImGui.TextColored(new Vector4(1, 1, 0, 1), "Configuration changed");

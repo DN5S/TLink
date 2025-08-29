@@ -34,7 +34,7 @@ public class DeepLPipelineHandler(
     {
         if (!IsEnabled)
         {
-            await next();
+            await next().ConfigureAwait(false);
             return;
         }
         
@@ -51,11 +51,11 @@ public class DeepLPipelineHandler(
             
             context.Metadata["DeepL.StartTime"] = DateTime.UtcNow;
             
-            var encodedMessage = seStringProcessor.Encode(context.OriginalMessage.SeStringMessage);
+            var encodedMessage = SeStringProcessor.Encode(context.OriginalMessage.SeStringMessage);
             
             if (string.IsNullOrWhiteSpace(encodedMessage.XmlText))
             {
-                await next();
+                await next().ConfigureAwait(false);
                 return;
             }
             
@@ -63,9 +63,17 @@ public class DeepLPipelineHandler(
                 encodedMessage.XmlText,
                 context.SourceLanguage,
                 context.TargetLanguage
-            );
+            ).ConfigureAwait(false);
+            
+            logger.Debug($"DeepL: Original XML: {encodedMessage.XmlText}");
+            logger.Debug($"DeepL: Translated XML: {translatedXml}");
             
             var translatedSeString = seStringProcessor.Decode(translatedXml, encodedMessage.PayloadMap);
+            logger.Debug($"DeepL: Decoded SeString payload count: {translatedSeString.Payloads.Count}");
+            
+            // Log the payload types for debugging
+            var payloadTypes = translatedSeString.Payloads.Select(p => p.GetType().Name).ToList();
+            logger.Debug($"DeepL: Payload types: {string.Join(", ", payloadTypes)}");
             
             stopwatch.Stop();
             
@@ -90,14 +98,14 @@ public class DeepLPipelineHandler(
         {
             logger.Warning("DeepL: Translation request was cancelled or timed out");
             context.Metadata["DeepL.Error"] = "Timeout";
-            await next();
+            await next().ConfigureAwait(false);
         }
         catch (Exception ex)
         {
             logger.Error($"DeepL: Translation failed: {ex.Message}");
             context.Metadata["DeepL.Error"] = ex.Message;
             
-            await next();
+            await next().ConfigureAwait(false);
         }
     }
     

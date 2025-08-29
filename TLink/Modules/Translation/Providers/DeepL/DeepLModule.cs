@@ -24,10 +24,9 @@ public class DeepLModule : ModuleBase
     private enum ApiKeyStatus { Idle, Validating, Valid, Invalid }
     private ApiKeyStatus currentApiKeyStatus = ApiKeyStatus.Idle;
     private string lastValidatedApiKey = string.Empty;
-    private Timer? validationDebounceTimer;
     
     public override string Name => "DeepL";
-    public override string Version => "1.0.0";
+    public override string Version => "1.0.1";
     public override string[] Dependencies => ["Translation"];
     
     // 1. Use proper lifecycle to load configuration
@@ -78,25 +77,28 @@ public class DeepLModule : ModuleBase
     
     private void UpdateHandlerRegistration(IPipelineHandlerRegistry handlerRegistry)
     {
-        if (pipelineHandler == null) return;
+        if (pipelineHandler == null) 
+        {
+            Logger.Warning("DeepL: pipelineHandler is null, cannot register");
+            return;
+        }
+        
+        Logger.Information($"DeepL: UpdateHandlerRegistration - Enabled: {moduleConfig?.Enabled}, IsConfigured: {moduleConfig?.IsConfigured()}, Handler.IsEnabled: {pipelineHandler.IsEnabled}");
         
         if (pipelineHandler.IsEnabled)
         {
             handlerRegistry.RegisterHandler(pipelineHandler, Name);
-            Logger.Information($"DeepL handler registered/updated. Priority: {pipelineHandler.Priority}");
+            Logger.Information($"DeepL handler registered/updated. Priority: {pipelineHandler.Priority}, APIKey set: {!string.IsNullOrWhiteSpace(moduleConfig?.ApiKey)}");
         }
         else
         {
             handlerRegistry.UnregisterHandler(pipelineHandler.Name);
-            Logger.Information("DeepL handler unregistered due to being disabled or misconfigured.");
+            Logger.Information($"DeepL handler unregistered - Enabled: {moduleConfig?.Enabled}, HasApiKey: {!string.IsNullOrWhiteSpace(moduleConfig?.ApiKey)}");
         }
     }
     
     private void TriggerValidation(string apiKey)
     {
-        // Cancel any previous validation timer
-        validationDebounceTimer?.Dispose();
-        
         // If the key is empty, return to the idle state
         if (string.IsNullOrWhiteSpace(apiKey))
         {
@@ -110,37 +112,67 @@ public class DeepLModule : ModuleBase
         
         // Set status to validating immediately for UI feedback
         currentApiKeyStatus = ApiKeyStatus.Validating;
-        validationDebounceTimer = new Timer(_ => 
+        
+        // Run validation completely off the main thread
+        Task.Run(async () =>
         {
-            Task.Run(async () => await ValidateApiKeyAsync(apiKey));
-        }, null, 500, Timeout.Infinite);
+            // Add a small delay for debouncing
+            await Task.Delay(500);
+            await ValidateApiKeyAsync(apiKey);
+        }).ContinueWith(task =>
+        {
+            if (task.IsFaulted)
+            {
+                Logger.Error($"Validation task failed: {task.Exception?.GetBaseException().Message}");
+                framework?.RunOnFrameworkThread(() =>
+                {
+                    currentApiKeyStatus = ApiKeyStatus.Invalid;
+                });
+            }
+        }, TaskScheduler.Default);
     }
     
     private async Task ValidateApiKeyAsync(string apiKey)
     {
         try
         {
+            Logger.Debug($"DeepL: Starting API key validation");
+            
             // Create temporary config and client for validation
             var tempConfig = new DeepLConfig 
             { 
                 ApiKey = apiKey, 
-                UsePro = moduleConfig?.UsePro ?? false 
+                UsePro = moduleConfig?.UsePro ?? false,
+                TimeoutMs = 5000  // Use shorter timeout for validation
             };
             
+            // Use a cancellation token with timeout to prevent hanging
+            using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
             using var apiClient = new DeepLApiClient(tempConfig, Logger);
-            var isValid = await apiClient.ValidateApiKeyAsync();
             
-            // Update the validation state on the main thread to avoid deadlock
+            var isValid = await apiClient.ValidateApiKeyAsync(cts.Token).ConfigureAwait(false);
+            
+            Logger.Debug($"DeepL: API key validation result: {isValid}");
+            
+            // Update the validation state on the main thread
             framework?.RunOnFrameworkThread(() =>
             {
                 currentApiKeyStatus = isValid ? ApiKeyStatus.Valid : ApiKeyStatus.Invalid;
                 lastValidatedApiKey = apiKey;
             });
         }
+        catch (TaskCanceledException)
+        {
+            Logger.Warning("DeepL: API key validation timed out");
+            framework?.RunOnFrameworkThread(() =>
+            {
+                currentApiKeyStatus = ApiKeyStatus.Invalid;
+                lastValidatedApiKey = apiKey;
+            });
+        }
         catch (Exception ex)
         {
-            Logger.Error($"Error validating API key: {ex.Message}");
-            // Update state on the main thread to avoid deadlock
+            Logger.Error($"DeepL: Error validating API key: {ex.Message}");
             framework?.RunOnFrameworkThread(() =>
             {
                 currentApiKeyStatus = ApiKeyStatus.Invalid;
@@ -158,8 +190,6 @@ public class DeepLModule : ModuleBase
             handlerRegistry.UnregisterHandler(pipelineHandler.Name);
             pipelineHandler.Dispose();
         }
-        
-        validationDebounceTimer?.Dispose();
         
         base.Dispose();
         GC.SuppressFinalize(this);
@@ -204,6 +234,7 @@ public class DeepLModule : ModuleBase
                 if (ImGui.IsItemHovered())
                     ImGui.SetTooltip("API key is invalid or has an issue");
                 break;
+            case ApiKeyStatus.Idle:
             default: // ApiKeyStatus.Idle
                 ImGuiComponents.HelpMarker("Enter your DeepL API Key. Validation will start automatically.");
                 break;

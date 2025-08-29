@@ -42,17 +42,49 @@ public partial class ChatEchoModule : ModuleBase
             EventBus.Listen<MessageTranslatedEvent>()
                 .Subscribe(evt =>
                 {
-                    if (!moduleConfig?.Enabled ?? false)
+                    if (moduleConfig?.Enabled != true)
+                    {
+                        Logger.Debug("ChatEcho: Module is disabled, skipping output");
                         return;
+                    }
+                    
+                    Logger.Information($"ChatEcho: Received translation event for message from {evt.OriginalMessage.Sender}");
                     
                     var output = FormatTranslation(evt);
                     chatGui.Print(output);
                     
-                    Logger.Debug($"Echoed translation to chat: {evt.OriginalMessage.Message} -> {evt.TranslatedResult.TranslatedText}");
+                    Logger.Information($"ChatEcho: Successfully echoed translation to chat: {evt.OriginalMessage.Message} -> {evt.TranslatedResult.TranslatedText}");
                 })
         );
         
-        Logger.Information("ChatEcho module initialized");
+        // Also subscribe to pipeline completion events for debugging
+        Subscriptions.Add(
+            EventBus.Listen<PipelineExecutionCompleted>()
+                .Subscribe(evt =>
+                {
+                    Logger.Debug($"ChatEcho: Pipeline completed - RequestId: {evt.RequestId}, " +
+                                $"HasResult: {evt.Result != null}, " +
+                                $"ExecutionTime: {evt.ExecutionTime.TotalMilliseconds}ms, " +
+                                $"Handlers: [{string.Join(", ", evt.ExecutedHandlers)}], " +
+                                $"TerminatingHandler: {evt.TerminatingHandler ?? "None"}");
+                    
+                    if (evt.Result == null)
+                    {
+                        Logger.Warning("ChatEcho: Pipeline completed without a translation result. Check if translation handlers are enabled and configured.");
+                    }
+                })
+        );
+        
+        // Subscribe to pipeline errors
+        Subscriptions.Add(
+            EventBus.Listen<TranslationErrorEvent>()
+                .Subscribe(evt =>
+                {
+                    Logger.Error($"ChatEcho: Translation error for message from {evt.OriginalMessage.Sender}: {evt.Error}");
+                })
+        );
+        
+        Logger.Information($"ChatEcho module initialized - Enabled: {moduleConfig?.Enabled}, OutputFormat: {moduleConfig?.OutputFormat}");
     }
     
     private SeString FormatTranslation(MessageTranslatedEvent evt)

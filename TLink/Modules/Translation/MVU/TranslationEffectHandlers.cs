@@ -17,18 +17,24 @@ namespace TLink.Modules.Translation.MVU;
 /// </summary>
 public class PipelineExecutionEffectHandler(
     Func<IReadOnlyList<ITranslationPipelineHandler>> getHandlers,
-    IStore<TranslationState> store,
     EventBus eventBus,
     IPluginLog logger)
     : IEffectHandler<ExecutePipelineEffect>
 {
     public async Task HandleAsync(ExecutePipelineEffect effect, IStore baseStore)
     {
+        logger.Information($"PipelineExecutionEffectHandler: Starting pipeline for message from {effect.Message.Sender}");
+        
         var context = new TranslationContext(effect.Message, effect.SourceLanguage, effect.TargetLanguage);
-        var handlers = getHandlers()
+        var allHandlers = getHandlers();
+        logger.Debug($"PipelineExecutionEffectHandler: Total handlers available: {allHandlers.Count}");
+        
+        var handlers = allHandlers
             .Where(h => h.IsEnabled)
             .OrderBy(h => h.Priority)
             .ToList();
+        
+        logger.Debug($"PipelineExecutionEffectHandler: Enabled handlers: {handlers.Count}");
         
         if (handlers.Count == 0)
         {
@@ -37,8 +43,7 @@ public class PipelineExecutionEffectHandler(
             return;
         }
         
-        // Notify pipeline started - use async to prevent nested synchronous dispatch
-        await store.DispatchAsync(new PipelineStartedAction(context.RequestId, context));
+        // Just publish event - avoid nested dispatch that causes deadlock
         eventBus.Publish(new PipelineExecutionStarted(context.RequestId, effect.Message));
         
         var stopwatch = Stopwatch.StartNew();
@@ -47,22 +52,16 @@ public class PipelineExecutionEffectHandler(
         try
         {
             // Build the pipeline chain
-            await ExecutePipelineAsync(handlers, context, executedHandlers);
+            await ExecutePipelineAsync(handlers, context, executedHandlers).ConfigureAwait(false);
             
             stopwatch.Stop();
-            
-            // Pipeline completed - use async to prevent nested synchronous dispatch
-            await store.DispatchAsync(new PipelineCompletedAction(
-                context.RequestId,
-                context.Result,
-                stopwatch.Elapsed
-            ));
             
             // Determine which handler terminated the pipeline
             var terminatingHandler = context.IsHandled && executedHandlers.Count != 0
                                          ? executedHandlers.Last() 
                                          : null;
             
+            // Just publish event - avoid nested dispatch that causes deadlock
             eventBus.Publish(new PipelineExecutionCompleted(
                 context.RequestId,
                 context.Result,
@@ -70,17 +69,18 @@ public class PipelineExecutionEffectHandler(
                 executedHandlers,
                 terminatingHandler
             ));
+            
+            // If we have a result, publish the translation event
+            if (context.Result != null)
+            {
+                eventBus.Publish(new MessageTranslatedEvent(effect.Message, context.Result));
+            }
         }
         catch (Exception ex)
         {
             logger.Error(ex, "Pipeline execution failed");
             
-            await store.DispatchAsync(new PipelineFailedAction(
-                context.RequestId,
-                ex.Message,
-                executedHandlers.LastOrDefault() ?? "Unknown"
-            ));
-            
+            // Just publish event - avoid nested dispatch that causes deadlock
             eventBus.Publish(new TranslationErrorEvent(effect.Message, ex.Message));
         }
     }
@@ -112,17 +112,12 @@ public class PipelineExecutionEffectHandler(
                 {
                     executedHandlers.Add(currentHandler.Name);
                     
-                    await currentHandler.HandleAsync(context, next);
+                    await currentHandler.HandleAsync(context, next).ConfigureAwait(false);
                     
                     handlerStopwatch.Stop();
                     
-                    // Record handler execution - use async to prevent nested synchronous dispatch
-                    await store.DispatchAsync(new PipelineHandlerExecutedAction(
-                        context.RequestId,
-                        currentHandler.Name,
-                        handlerStopwatch.Elapsed,
-                        context.IsHandled
-                    ));
+                    // Log handler execution without dispatching to avoid deadlock
+                    logger.Debug($"Handler {currentHandler.Name} executed in {handlerStopwatch.ElapsedMilliseconds}ms, Handled: {context.IsHandled}");
                 }
                 catch (Exception ex)
                 {

@@ -1,4 +1,5 @@
 using System;
+using System.Threading.Tasks;
 using Dalamud.Game.Text;
 using Dalamud.Plugin.Services;
 using Dalamud.Game.Text.SeStringHandling;
@@ -56,11 +57,15 @@ public class ChatModule : ModuleBase
         // Initialize viewModel with store
         viewModel.Initialize(store);
         
-        store.Dispatch(new LoadConfigurationAction(moduleConfig!));
+        // Use async dispatch to avoid deadlock during initialization
+        _ = Task.Run(async () => 
+        {
+            await store.DispatchAsync(new LoadConfigurationAction(moduleConfig!)).ConfigureAwait(false);
+        });
         
         chatGui.ChatMessage += OnChatMessage;
         
-        Logger.Information("Chat module initialized with MVU pattern");
+        Logger.Information($"Chat module initialized with MVU pattern. Translatable channels: [{string.Join(", ", store.State.TranslatableChannels)}]");
     }
     
     private void OnChatMessage(XivChatType type, int timestamp, ref SeString sender, ref SeString message, ref bool isHandled)
@@ -75,10 +80,17 @@ public class ChatModule : ModuleBase
             SeStringMessage = new SeString(message.Payloads)
         };
         
+        Logger.Debug($"Chat: Received message - Type: {type}, Sender: {sender.TextValue}, Message: {message.TextValue}");
+        
         // Check if this message type should be translated
         if (store?.State.TranslatableChannels.Contains(type) == true)
         {
+            Logger.Information($"Chat: Publishing TranslatableMessageReceived for {type} message from {sender.TextValue}");
             EventBus.Publish(new TranslatableMessageReceived(chatMessage));
+        }
+        else
+        {
+            Logger.Debug($"Chat: Message type {type} is not marked for translation. Enabled channels: [{string.Join(", ", store?.State.TranslatableChannels ?? [])}]");
         }
         
         // Still publish the general event for other modules that might need it

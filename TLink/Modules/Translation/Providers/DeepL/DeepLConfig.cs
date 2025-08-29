@@ -14,7 +14,7 @@ public class DeepLConfig : ModuleConfiguration
     
     public int MaxRetries { get; set; } = 3;
     
-    public int TimeoutMs { get; set; } = 10000;
+    public int TimeoutMs { get; init; } = 10000;
     
     public bool Enabled { get; set; }
     

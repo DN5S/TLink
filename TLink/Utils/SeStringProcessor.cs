@@ -3,32 +3,20 @@ using System.Linq;
 using System.Text;
 using System.Text.RegularExpressions;
 using System.Web;
+using System.Xml.Linq;
 using Dalamud.Game.Text.SeStringHandling;
 using Dalamud.Game.Text.SeStringHandling.Payloads;
 
 namespace TLink.Utils;
 
-/// <summary>
-/// Converts SeString to semantic XML format for translation and back.
-/// Preserves the context of wrapping payloads (colors, emphasis) and standalone payloads.
-/// </summary>
 public class SeStringProcessor
 {
-    // Patterns for different semantic tags
-    private static readonly Regex ColorTagPattern = new(@"<c\s+id=""(\d+)"">(.*?)</c>", RegexOptions.Compiled | RegexOptions.Singleline);
-    private static readonly Regex EmphasisTagPattern = new(@"<em\s+id=""(\d+)"">(.*?)</em>", RegexOptions.Compiled | RegexOptions.Singleline);
-    private static readonly Regex IconTagPattern = new(@"<icon\s+id=""(\d+)""\s*/>", RegexOptions.Compiled);
-    private static readonly Regex ItemTagPattern = new(@"<item\s+id=""(\d+)"">(.*?)</item>", RegexOptions.Compiled | RegexOptions.Singleline);
-    private static readonly Regex PlayerTagPattern = new(@"<player\s+id=""(\d+)"">(.*?)</player>", RegexOptions.Compiled | RegexOptions.Singleline);
-    private static readonly Regex MapTagPattern = new(@"<map\s+id=""(\d+)"">(.*?)</map>", RegexOptions.Compiled | RegexOptions.Singleline);
-    private static readonly Regex GenericTagPattern = new(@"<x\s+id=""(\d+)""\s*/>", RegexOptions.Compiled);
-    
-    public XmlEncodedMessage Encode(SeString seString)
+    public static XmlEncodedMessage Encode(SeString seString)
     {
         var xmlBuilder = new StringBuilder();
         var payloadMap = new Dictionary<int, Payload>();
         var payloadIndex = 0;
-        var openTags = new Stack<(string closeTag, int id)>();
+        var openTags = new Stack<(string tagType, string closeTag, int id)>();
         
         foreach (var payload in seString.Payloads)
         {
@@ -38,13 +26,16 @@ public class SeStringProcessor
                     xmlBuilder.Append(HttpUtility.HtmlEncode(text.Text));
                     break;
                 
-                // --- Wrapping Payloads (with context) ---
-                
                 case UIForegroundPayload foreground when foreground.ColorKey != 0:
-                    // Start of color
+                    if (openTags.Count != 0 && openTags.Peek().closeTag == "</c>")
+                    {
+                        // Close the previous color first
+                        xmlBuilder.Append(openTags.Pop().closeTag);
+                    }
+                    // Now start the new color
                     var colorId = payloadIndex++;
                     xmlBuilder.Append($"<c id=\"{colorId}\">");
-                    openTags.Push(("</c>", colorId));
+                    openTags.Push(("color", "</c>", colorId));
                     payloadMap[colorId] = foreground;
                     break;
                 
@@ -57,10 +48,16 @@ public class SeStringProcessor
                     break;
                 
                 case UIGlowPayload glow when glow.ColorKey != 0:
-                    // Start of a glow
+                    // Start of a glow - but check if we're already in a glow and need to close it first
+                    if (openTags.Count != 0 && openTags.Peek().closeTag == "</glow>")
+                    {
+                        // Close the previous glow first
+                        xmlBuilder.Append(openTags.Pop().closeTag);
+                    }
+                    // Now start the new glow
                     var glowId = payloadIndex++;
                     xmlBuilder.Append($"<glow id=\"{glowId}\">");
-                    openTags.Push(("</glow>", glowId));
+                    openTags.Push(("glow", "</glow>", glowId));
                     payloadMap[glowId] = glow;
                     break;
                 
@@ -86,18 +83,16 @@ public class SeStringProcessor
                         // Start of emphasis
                         var emId = payloadIndex++;
                         xmlBuilder.Append($"<em id=\"{emId}\">");
-                        openTags.Push(("</em>", emId));
+                        openTags.Push(("em", "</em>", emId));
                         payloadMap[emId] = emphasis;
                     }
                     break;
-                
-                // --- Compound Payloads (icon and text as a unit) ---
                 
                 case ItemPayload item:
                     // Items are usually followed by text that names the item
                     var itemId = payloadIndex++;
                     xmlBuilder.Append($"<item id=\"{itemId}\">");
-                    openTags.Push(("</item>", itemId));
+                    openTags.Push(("item", "</item>", itemId));
                     payloadMap[itemId] = item;
                     break;
                 
@@ -105,18 +100,16 @@ public class SeStringProcessor
                     // Players are usually followed by the player name text
                     var playerId = payloadIndex++;
                     xmlBuilder.Append($"<player id=\"{playerId}\">");
-                    openTags.Push(("</player>", playerId));
+                    openTags.Push(("player", "</player>", playerId));
                     payloadMap[playerId] = player;
                     break;
                 
                 case MapLinkPayload mapLink:
                     var mapId = payloadIndex++;
                     xmlBuilder.Append($"<map id=\"{mapId}\">");
-                    openTags.Push(("</map>", mapId));
+                    openTags.Push(("map", "</map>", mapId));
                     payloadMap[mapId] = mapLink;
                     break;
-                
-                // --- Standalone Payloads (self-closing) ---
                 
                 case IconPayload icon:
                     var iconId = payloadIndex++;
@@ -185,87 +178,154 @@ public class SeStringProcessor
     {
         var payloads = new List<Payload>();
         
-        // Process the XML text to reconstruct payloads
-        var position = 0;
-        while (position < xmlText.Length)
+        try
         {
-            // Find the next tag
-            var nextTag = FindNextTag(xmlText, position);
+            // Fix various XML corruptions that DeepL might introduce
             
-            if (nextTag == null)
+            // 1. Remove text content from tags that should be empty (glow/c tags with IDs that reset colors)
+            // Check a payload map to see if these are reset payloads (ColorKey = 0)
+            foreach (var kvp in payloadMap)
             {
-                // No more tags - add remaining text
-                var remainingText = xmlText[position..];
-                if (!string.IsNullOrEmpty(remainingText))
-                {
-                    payloads.Add(new TextPayload(HttpUtility.HtmlDecode(remainingText)));
-                }
-                break;
-            }
-            
-            // Add text before the tag
-            if (nextTag.Value.startIndex > position)
-            {
-                var textBeforeTag = xmlText.Substring(position, nextTag.Value.startIndex - position);
-                if (!string.IsNullOrEmpty(textBeforeTag))
-                {
-                    payloads.Add(new TextPayload(HttpUtility.HtmlDecode(textBeforeTag)));
-                }
-            }
-            
-            // Process the tag
-            if (payloadMap.TryGetValue(nextTag.Value.id, out var payload))
-            {
-                payloads.Add(payload);
+                var id = kvp.Key;
+                var payload = kvp.Value;
                 
-                // For wrapping tags, add the content and closing payload
-                if (!string.IsNullOrEmpty(nextTag.Value.content))
+                // Check if this is a reset payload (color or glow with ColorKey = 0)
+                if (payload is UIForegroundPayload { ColorKey: 0 } ||
+                    payload is UIGlowPayload { ColorKey: 0 })
                 {
-                    // Recursively decode the content
-                    var innerPayloads = Decode(nextTag.Value.content, payloadMap);
-                    payloads.AddRange(innerPayloads.Payloads);
-                    
-                    // Add closing payload based on type
-                    AddClosingPayload(payloads, payload);
+                    // Remove any text content from these tags as they should be empty
+                    xmlText = Regex.Replace(xmlText, $"""<(\w+)\s+id="{id}"[^>]*>[^<]+</\1>""", $"""<$1 id="{id}"></$1>""");
                 }
             }
             
-            position = nextTag.Value.endIndex;
+            // 2. Clean up spaces in empty tags that DeepL might have added
+            // This is a more aggressive pattern that catches various whitespace combinations
+            xmlText = Regex.Replace(xmlText, @"<(\w+)([^>]*)>\s*</\1>", "<$1$2></$1>");
+            
+            // 2b. Also clean up self-closing tags with spaces
+            xmlText = Regex.Replace(xmlText, @"<(\w+)([^>]*)/\s*>", "<$1$2/>");
+            
+            // 3. Fix duplicate item/map/player tags (DeepL sometimes duplicates them)
+            // Pattern to match any tag with an id attribute
+            var tagPattern = """<(item|map|player)\s+id="(\d+)"[^>]*>(.*?)</\1>""";
+            var tagMatches = Regex.Matches(xmlText, tagPattern);
+            var seenTags = new Dictionary<string, int>();
+            
+            foreach (Match match in tagMatches)
+            {
+                var tagType = match.Groups[1].Value;
+                var tagId = match.Groups[2].Value;
+                var key = $"{tagType}:{tagId}";
+                
+                if (seenTags.TryGetValue(key, out var count))
+                {
+                    // This is a duplicate tag with the same ID
+                    // DeepL sometimes creates these incorrectly
+                    // Remove the duplicate by replacing it with just its content
+                    if (count > 0)
+                    {
+                        var fullMatch = match.Value;
+                        var content = match.Groups[3].Value;
+                        xmlText = xmlText.Replace(fullMatch, content);
+                    }
+                    seenTags[key] = count + 1;
+                }
+                else
+                {
+                    seenTags[key] = 1;
+                }
+            }
+            
+            // 4. Remove any item/map/player tags that DeepL incorrectly inserted
+            // These would have IDs that don't exist in our payload map
+            foreach (Match match in Regex.Matches(xmlText, tagPattern))
+            {
+                var tagId = int.Parse(match.Groups[2].Value);
+                if (!payloadMap.ContainsKey(tagId))
+                {
+                    // This tag was incorrectly added by DeepL, remove it
+                    xmlText = xmlText.Replace(match.Value, match.Groups[3].Value);
+                }
+            }
+            
+            // Wrap in a root element to make it valid XML
+            var wrappedXml = $"<root>{xmlText}</root>";
+            var doc = XDocument.Parse(wrappedXml);
+            
+            // Process the root element's nodes
+            if (doc.Root != null) ProcessNodes(doc.Root.Nodes(), payloads, payloadMap);
+        }
+        catch
+        {
+            // If XML parsing fails, fall back to treating it as plain text
+            payloads.Add(new TextPayload(xmlText));
         }
         
         return new SeString(payloads);
     }
     
-    private static (int startIndex, int endIndex, int id, string? content)? FindNextTag(string xml, int startPosition)
+    private static void ProcessNodes(IEnumerable<XNode> nodes, List<Payload> payloads, Dictionary<int, Payload> payloadMap)
     {
-        var minIndex = int.MaxValue;
-        (int startIndex, int endIndex, int id, string? content)? result = null;
-        
-        // Check all tag patterns
-        var patterns = new[]
+        foreach (var node in nodes)
         {
-            (ColorTagPattern, true),
-            (EmphasisTagPattern, true),
-            (ItemTagPattern, true),
-            (PlayerTagPattern, true),
-            (MapTagPattern, true),
-            (IconTagPattern, false),
-            (GenericTagPattern, false)
-        };
-        
-        foreach (var (pattern, hasContent) in patterns)
-        {
-            var match = pattern.Match(xml, startPosition);
-            if (match.Success && match.Index < minIndex)
+            switch (node)
             {
-                minIndex = match.Index;
-                var id = int.Parse(match.Groups[1].Value);
-                var content = hasContent && match.Groups.Count > 2 ? match.Groups[2].Value : null;
-                result = (match.Index, match.Index + match.Length, id, content);
+                case XText text:
+                    // Plain text node
+                    var textValue = text.Value;
+                    // Only add text payloads if they contain actual content (not just whitespace)
+                    // This prevents issues where DeepL adds spaces in empty tags
+                    if (!string.IsNullOrWhiteSpace(textValue))
+                    {
+                        payloads.Add(new TextPayload(textValue));
+                    }
+                    break;
+                    
+                case XElement element:
+                    // Element with ID attribute
+                    var idAttr = element.Attribute("id");
+                    if (idAttr != null && int.TryParse(idAttr.Value, out var id))
+                    {
+                        // Add the opening payload
+                        if (payloadMap.TryGetValue(id, out var payload))
+                        {
+                            payloads.Add(payload);
+                            
+                            // Check if this is a self-closing element (icon, auto, x)
+                            var isSelfClosing = element.Name.LocalName is "icon" or "auto" or "x";
+                            
+                            // Process child nodes (if any and not self-closing)
+                            if (!isSelfClosing && element.Nodes().Any())
+                            {
+                                ProcessNodes(element.Nodes(), payloads, payloadMap);
+                            }
+                            
+                            // Add a closing payload for container tags (not self-closing)
+                            if (!isSelfClosing && !element.IsEmpty)
+                            {
+                                AddClosingPayload(payloads, payload);
+                            }
+                        }
+                        else
+                        {
+                            // ID isn't found - process children anyway to not lose content
+                            if (element.Nodes().Any())
+                            {
+                                ProcessNodes(element.Nodes(), payloads, payloadMap);
+                            }
+                        }
+                    }
+                    else
+                    {
+                        // Element without ID - just process children
+                        if (element.Nodes().Any())
+                        {
+                            ProcessNodes(element.Nodes(), payloads, payloadMap);
+                        }
+                    }
+                    break;
             }
         }
-        
-        return result;
     }
     
     private static void AddClosingPayload(List<Payload> payloads, Payload openingPayload)
@@ -285,7 +345,8 @@ public class SeStringProcessor
             case PlayerPayload:
             case MapLinkPayload:
                 // These are typically closed by RawPayload end markers
-                payloads.Add(new RawPayload([0x02, 0x27, 0x03])); // Generic end marker
+                // Use Dalamud's predefined LinkTerminator for proper link closure
+                payloads.Add(RawPayload.LinkTerminator);
                 break;
         }
     }

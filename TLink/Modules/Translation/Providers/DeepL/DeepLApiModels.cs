@@ -15,13 +15,16 @@ public class DeepLTranslateRequest
     public string TargetLang { get; set; } = "EN";
 
     [JsonPropertyName("preserve_formatting")]
-    public int? PreserveFormatting { get; set; }
+    public bool? PreserveFormatting { get; set; }
 
     [JsonPropertyName("tag_handling")]
     public string? TagHandling { get; set; }
 
     [JsonPropertyName("split_sentences")]
     public string? SplitSentences { get; set; }
+
+    [JsonPropertyName("ignore_tags")]
+    public List<string>? IgnoreTags { get; set; }
 }
 
 public class DeepLTranslateResponse

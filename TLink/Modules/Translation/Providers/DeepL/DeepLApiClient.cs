@@ -71,13 +71,14 @@ public class DeepLApiClient : IDisposable
             Text = [text],
             SourceLang = MapLanguageCode(sourceLang, isSource: true),
             TargetLang = MapLanguageCode(targetLang, isSource: false),
-            PreserveFormatting = config.PreserveFormatting ? 1 : 0
+            PreserveFormatting = config.PreserveFormatting
         };
         
         if (config.PreserveFormatting)
         {
             request.TagHandling = "xml";
             request.SplitSentences = "0";
+            request.IgnoreTags = ["icon", "auto", "x"];  // Don't translate these tags' content
         }
         
         var content = new StringContent(
@@ -95,9 +96,9 @@ public class DeepLApiClient : IDisposable
                     "translate",
                     content,
                     cancellationToken
-                );
+                ).ConfigureAwait(false);
                 
-                var responseText = await response.Content.ReadAsStringAsync(cancellationToken);
+                var responseText = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
                 
                 if (response.IsSuccessStatusCode)
                 {
@@ -107,17 +108,13 @@ public class DeepLApiClient : IDisposable
                     );
                     
                     var translation = result?.Translations.FirstOrDefault();
-                    if (translation != null)
-                    {
-                        return (translation.Text, translation.DetectedSourceLanguage);
-                    }
-                    return (text, null);
+                    return translation != null ? (translation.Text, translation.DetectedSourceLanguage) : (text, null);
                 }
                 
                 if ((int)response.StatusCode >= 500 && retryCount < config.MaxRetries)
                 {
                     retryCount++;
-                    await Task.Delay(1000 * retryCount, cancellationToken);
+                    await Task.Delay(1000 * retryCount, cancellationToken).ConfigureAwait(false);
                     continue;
                 }
                 
@@ -138,7 +135,7 @@ public class DeepLApiClient : IDisposable
             {
                 retryCount++;
                 logger.Warning($"DeepL API request failed (attempt {retryCount}): {ex.Message}");
-                await Task.Delay(1000 * retryCount, cancellationToken);
+                await Task.Delay(1000 * retryCount, cancellationToken).ConfigureAwait(false);
             }
         }
         
@@ -148,19 +145,19 @@ public class DeepLApiClient : IDisposable
     public async Task<List<DeepLLanguage>> GetSupportedLanguagesAsync(
         CancellationToken cancellationToken = default)
     {
-        var response = await httpClient.GetAsync("languages", cancellationToken);
+        var response = await httpClient.GetAsync("languages", cancellationToken).ConfigureAwait(false);
         response.EnsureSuccessStatusCode();
         
-        var responseText = await response.Content.ReadAsStringAsync(cancellationToken);
+        var responseText = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
         return JsonSerializer.Deserialize<List<DeepLLanguage>>(responseText, jsonOptions) ?? [];
     }
     
     public async Task<DeepLUsage> GetUsageAsync(CancellationToken cancellationToken = default)
     {
-        var response = await httpClient.GetAsync("usage", cancellationToken);
+        var response = await httpClient.GetAsync("usage", cancellationToken).ConfigureAwait(false);
         response.EnsureSuccessStatusCode();
         
-        var responseText = await response.Content.ReadAsStringAsync(cancellationToken);
+        var responseText = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
         return JsonSerializer.Deserialize<DeepLUsage>(responseText, jsonOptions) 
             ?? new DeepLUsage();
     }
@@ -169,8 +166,22 @@ public class DeepLApiClient : IDisposable
     {
         try
         {
-            await GetUsageAsync(cancellationToken);
+            // Add timeout protection
+            using var cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            cts.CancelAfter(TimeSpan.FromSeconds(5));
+            
+            await GetUsageAsync(cts.Token).ConfigureAwait(false);
             return true;
+        }
+        catch (TaskCanceledException)
+        {
+            logger.Warning("DeepL API key validation timed out");
+            return false;
+        }
+        catch (HttpRequestException ex)
+        {
+            logger.Warning($"DeepL API key validation failed (HTTP error): {ex.Message}");
+            return false;
         }
         catch (Exception ex)
         {
@@ -179,17 +190,14 @@ public class DeepLApiClient : IDisposable
         }
     }
     
-    private string MapLanguageCode(string code, bool isSource)
+    private static string MapLanguageCode(string code, bool isSource)
     {
         if (string.IsNullOrWhiteSpace(code))
             return isSource ? "" : "EN";
         
         var lowerCode = code.ToLowerInvariant();
         
-        if (LanguageCodeMap.TryGetValue(lowerCode, out var mappedCode))
-            return mappedCode;
-        
-        return code.ToUpperInvariant();
+        return LanguageCodeMap.TryGetValue(lowerCode, out var mappedCode) ? mappedCode : code.ToUpperInvariant();
     }
     
     public void Dispose()

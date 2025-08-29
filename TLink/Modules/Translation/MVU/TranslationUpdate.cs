@@ -107,13 +107,8 @@ public static class TranslationUpdate
         TranslationState state,
         ExecutePipelineAction action)
     {
-        // Only execute if we have enabled handlers
-        if (!state.RegisteredHandlers.Any(h => h.IsEnabled))
-        {
-            return UpdateResult<TranslationState>.NoChange(state);
-        }
-        
-        // Create effect to execute pipeline
+        // Always create the effect - the effect handler will check for enabled handlers
+        // This avoids timing issues with async handler registration
         return UpdateResult<TranslationState>.WithEffects(
             state,
             new ExecutePipelineEffect(action.Message, action.SourceLanguage, action.TargetLanguage)

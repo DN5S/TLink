@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Threading.Tasks;
 using Microsoft.Extensions.DependencyInjection;
 using TLink.Core.Module;
 using TLink.Core.MVU;
@@ -59,7 +60,7 @@ public class TranslationModule : ModuleBase, IPipelineHandlerRegistry
         store = (Store<TranslationState>)Services.GetRequiredService<IStore<TranslationState>>();
         viewModel = Services.GetRequiredService<TranslationViewModel>();
         
-        store.RegisterEffectHandler(new PipelineExecutionEffectHandler(GetHandlers, store, EventBus, Logger));
+        store.RegisterEffectHandler(new PipelineExecutionEffectHandler(GetHandlers, EventBus, Logger));
         store.RegisterEffectHandler(new PublishHandlerRegisteredEffectHandler(EventBus));
         store.RegisterEffectHandler(new PublishHandlerUnregisteredEffectHandler(EventBus));
         store.RegisterEffectHandler(new PublishPipelineStartedEffectHandler(EventBus));
@@ -79,17 +80,31 @@ public class TranslationModule : ModuleBase, IPipelineHandlerRegistry
             EventBus.Listen<TranslatableMessageReceived>()
                 .Subscribe(msg =>
                 {
+                    Logger.Information($"Translation: Received TranslatableMessageReceived for message from {msg.Message.Sender} at {msg.Message.Timestamp}");
+                    
                     // Execute the pipeline asynchronously to avoid blocking the main thread
                     // a Fire-and-forget pattern prevents main thread freezing during network operations
-                    _ = store.DispatchAsync(new ExecutePipelineAction(
-                        msg.Message,
-                        moduleConfig?.SourceLanguage ?? "auto",
-                        moduleConfig?.TargetLanguage ?? "en"
-                    ));
+                    _ = Task.Run(async () =>
+                    {
+                        try
+                        {
+                            await store.DispatchAsync(new ExecutePipelineAction(
+                                msg.Message,
+                                moduleConfig?.SourceLanguage ?? "auto",
+                                moduleConfig?.TargetLanguage ?? "en"
+                            )).ConfigureAwait(false);
+                            
+                            Logger.Debug($"Translation: Successfully dispatched pipeline execution for message: \"{msg.Message.Message}\"");
+                        }
+                        catch (Exception ex)
+                        {
+                            Logger.Error($"Translation: Failed to dispatch pipeline execution: {ex.Message}\n{ex.StackTrace}");
+                        }
+                    });
                 })
         );
         
-        Logger.Information("Translation orchestrator initialized");
+        Logger.Information($"Translation orchestrator initialized - SourceLang: {moduleConfig?.SourceLanguage ?? "auto"}, TargetLang: {moduleConfig?.TargetLanguage ?? "en"}, Handlers: {registeredHandlers.Count}");
     }
     
     public void RegisterHandler(ITranslationPipelineHandler handler, string moduleName)
@@ -103,8 +118,14 @@ public class TranslationModule : ModuleBase, IPipelineHandlerRegistry
         registeredHandlers.Add(handler);
         registeredHandlers.Sort((a, b) => a.Priority.CompareTo(b.Priority));
         
-        // Notify the store about registration with an explicit module name
-        store?.Dispatch(new RegisterHandlerAction(handler, moduleName));
+        // Notify the store about registration with an explicit module name - use async to avoid deadlock
+        if (store != null)
+        {
+            _ = Task.Run(async () => 
+            {
+                await store.DispatchAsync(new RegisterHandlerAction(handler, moduleName)).ConfigureAwait(false);
+            });
+        }
         
         Logger.Information($"Pipeline handler '{handler.Name}' from module '{moduleName}' registered with priority {handler.Priority}");
     }
@@ -116,8 +137,14 @@ public class TranslationModule : ModuleBase, IPipelineHandlerRegistry
         {
             registeredHandlers.Remove(handler);
             
-            // Notify store about unregistration
-            store?.Dispatch(new UnregisterHandlerAction(handlerName));
+            // Notify store about unregistration - use async to avoid deadlock
+            if (store != null)
+            {
+                _ = Task.Run(async () => 
+                {
+                    await store.DispatchAsync(new UnregisterHandlerAction(handlerName)).ConfigureAwait(false);
+                });
+            }
             
             Logger.Information($"Pipeline handler '{handlerName}' unregistered");
             return true;
