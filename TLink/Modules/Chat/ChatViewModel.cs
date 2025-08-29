@@ -26,9 +26,10 @@ public class ChatViewModel : IDisposable
         ImGui.Spacing();
         
         // Group channels by category for better organization
-        DrawChannelCategory("Combat", XivChatType.Say, XivChatType.Yell, XivChatType.Shout);
+        DrawChannelCategory("Common", XivChatType.Say, XivChatType.Yell, XivChatType.Shout);
         DrawChannelCategory("Party", XivChatType.Party, XivChatType.Alliance);
-        DrawChannelCategory("Social", XivChatType.FreeCompany, XivChatType.Ls1, XivChatType.Ls2, XivChatType.Ls3, XivChatType.Ls4, XivChatType.Ls5, XivChatType.Ls6, XivChatType.Ls7, XivChatType.Ls8);
+        DrawChannelCategory("Social", XivChatType.FreeCompany);
+        DrawChannelCategory("Linkshell", XivChatType.Ls1, XivChatType.Ls2, XivChatType.Ls3, XivChatType.Ls4, XivChatType.Ls5, XivChatType.Ls6, XivChatType.Ls7, XivChatType.Ls8);
         DrawChannelCategory("Cross-world", XivChatType.CrossLinkShell1, XivChatType.CrossLinkShell2, XivChatType.CrossLinkShell3, XivChatType.CrossLinkShell4, XivChatType.CrossLinkShell5, XivChatType.CrossLinkShell6, XivChatType.CrossLinkShell7, XivChatType.CrossLinkShell8);
         DrawChannelCategory("Private", XivChatType.TellIncoming, XivChatType.TellOutgoing);
         DrawChannelCategory("NPC", XivChatType.NPCDialogue, XivChatType.NPCDialogueAnnouncements);
@@ -39,7 +40,8 @@ public class ChatViewModel : IDisposable
         
         if (ImGui.Button("Reset to Defaults"))
         {
-            store.Dispatch(new ResetTranslatableChannelsAction());
+            // Use async dispatch for file I/O operation to prevent UI blocking
+            _ = store.DispatchAsync(new ResetTranslatableChannelsAction());
         }
     }
     
@@ -55,7 +57,8 @@ public class ChatViewModel : IDisposable
                 var isEnabled = store.State.TranslatableChannels.Contains(channel);
                 if (ImGui.Checkbox($"##{categoryName}_{channel}", ref isEnabled))
                 {
-                    store.Dispatch(new ToggleTranslatableChannelAction(channel));
+                    // Use async dispatch for file I/O operation to prevent UI blocking
+                    _ = store.DispatchAsync(new ToggleTranslatableChannelAction(channel));
                 }
                 ImGui.SameLine();
                 ImGui.Text(GetChannelDisplayName(channel));

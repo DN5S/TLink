@@ -37,8 +37,8 @@ public class PipelineExecutionEffectHandler(
             return;
         }
         
-        // Notify pipeline started
-        store.Dispatch(new PipelineStartedAction(context.RequestId, context));
+        // Notify pipeline started - use async to prevent nested synchronous dispatch
+        await store.DispatchAsync(new PipelineStartedAction(context.RequestId, context));
         eventBus.Publish(new PipelineExecutionStarted(context.RequestId, effect.Message));
         
         var stopwatch = Stopwatch.StartNew();
@@ -51,8 +51,8 @@ public class PipelineExecutionEffectHandler(
             
             stopwatch.Stop();
             
-            // Pipeline completed
-            store.Dispatch(new PipelineCompletedAction(
+            // Pipeline completed - use async to prevent nested synchronous dispatch
+            await store.DispatchAsync(new PipelineCompletedAction(
                 context.RequestId,
                 context.Result,
                 stopwatch.Elapsed
@@ -75,7 +75,7 @@ public class PipelineExecutionEffectHandler(
         {
             logger.Error(ex, "Pipeline execution failed");
             
-            store.Dispatch(new PipelineFailedAction(
+            await store.DispatchAsync(new PipelineFailedAction(
                 context.RequestId,
                 ex.Message,
                 executedHandlers.LastOrDefault() ?? "Unknown"
@@ -116,8 +116,8 @@ public class PipelineExecutionEffectHandler(
                     
                     handlerStopwatch.Stop();
                     
-                    // Record handler execution
-                    store.Dispatch(new PipelineHandlerExecutedAction(
+                    // Record handler execution - use async to prevent nested synchronous dispatch
+                    await store.DispatchAsync(new PipelineHandlerExecutedAction(
                         context.RequestId,
                         currentHandler.Name,
                         handlerStopwatch.Elapsed,

@@ -79,8 +79,9 @@ public class TranslationModule : ModuleBase, IPipelineHandlerRegistry
             EventBus.Listen<TranslatableMessageReceived>()
                 .Subscribe(msg =>
                 {
-                    // Execute the pipeline for each message
-                    store.Dispatch(new ExecutePipelineAction(
+                    // Execute the pipeline asynchronously to avoid blocking the main thread
+                    // a Fire-and-forget pattern prevents main thread freezing during network operations
+                    _ = store.DispatchAsync(new ExecutePipelineAction(
                         msg.Message,
                         moduleConfig?.SourceLanguage ?? "auto",
                         moduleConfig?.TargetLanguage ?? "en"
@@ -102,7 +103,7 @@ public class TranslationModule : ModuleBase, IPipelineHandlerRegistry
         registeredHandlers.Add(handler);
         registeredHandlers.Sort((a, b) => a.Priority.CompareTo(b.Priority));
         
-        // Notify store about registration with explicit module name
+        // Notify the store about registration with an explicit module name
         store?.Dispatch(new RegisterHandlerAction(handler, moduleName));
         
         Logger.Information($"Pipeline handler '{handler.Name}' from module '{moduleName}' registered with priority {handler.Priority}");
