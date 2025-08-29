@@ -1,91 +1,103 @@
+using System;
+using Dalamud.Interface.Components;
 using Microsoft.Extensions.DependencyInjection;
-using TLink.Core.Configuration;
+using Dalamud.Bindings.ImGui;
 using TLink.Core.Module;
 using TLink.Modules.Translation.Services;
-using TLink.Utils;
 
 namespace TLink.Modules.Translation.Providers.DeepL;
 
 [ModuleInfo("DeepL", "1.0.0", Dependencies = ["Translation"], Description = "DeepL translation provider for high-quality translations")]
 public class DeepLModule : ModuleBase
 {
+    private DeepLConfig? moduleConfig;
     private DeepLPipelineHandler? pipelineHandler;
     
     public override string Name => "DeepL";
     public override string Version => "1.0.0";
     public override string[] Dependencies => ["Translation"];
     
-    public override void RegisterServices(IServiceCollection services)
+    // 1. Use proper lifecycle to load configuration
+    protected override void LoadConfiguration()
     {
-        // Register config as a factory since it's not available during RegisterServices
-        services.AddSingleton<DeepLConfig>(sp =>
-        {
-            var pluginConfig = sp.GetRequiredService<PluginConfiguration>();
-            var config = pluginConfig.GetModuleConfig("DeepL");
-            if (config is DeepLConfig deepLConfig)
-                return deepLConfig;
-            
-            // Create the default config if not found
-            var newConfig = new DeepLConfig { ModuleName = "DeepL" };
-            pluginConfig.SetModuleConfig("DeepL", newConfig);
-            return newConfig;
-        });
-        
-        services.AddSingleton<DeepLApiClient>(sp =>
-        {
-            var config = sp.GetRequiredService<DeepLConfig>();
-            var logger = sp.GetRequiredService<Dalamud.Plugin.Services.IPluginLog>();
-            return new DeepLApiClient(config, logger);
-        });
-        
-        services.AddSingleton<DeepLPipelineHandler>(sp =>
-        {
-            var apiClient = sp.GetRequiredService<DeepLApiClient>();
-            var config = sp.GetRequiredService<DeepLConfig>();
-            var logger = sp.GetRequiredService<Dalamud.Plugin.Services.IPluginLog>();
-            var seStringProcessor = sp.GetRequiredService<SeStringProcessor>();
-            
-            return new DeepLPipelineHandler(apiClient, config, logger, seStringProcessor);
-        });
+        moduleConfig = GetModuleConfig<DeepLConfig>();
     }
     
+    // 2. Delegate dependency creation to a DI container
+    public override void RegisterServices(IServiceCollection services)
+    {
+        services.AddSingleton(moduleConfig!);
+        services.AddSingleton<DeepLApiClient>();
+        services.AddSingleton<DeepLPipelineHandler>();
+    }
+    
+    // 3. Get required services through dependency injection
     public override void Initialize()
     {
-        // Get the Translation module instance to access its registry
-        var moduleManager = Services.GetRequiredService<ModuleManager>();
-        var translationModule = moduleManager.GetModule("Translation") as IPipelineHandlerRegistry;
-        
-        if (translationModule == null)
-        {
-            Logger.Error("Translation module not found or does not implement IPipelineHandlerRegistry");
-            return;
-        }
-        
+        var handlerRegistry = Services.GetRequiredService<IPipelineHandlerRegistry>();
         pipelineHandler = Services.GetRequiredService<DeepLPipelineHandler>();
         
         if (pipelineHandler.IsEnabled)
         {
-            translationModule.RegisterHandler(pipelineHandler);
+            handlerRegistry.RegisterHandler(pipelineHandler);
             Logger.Information($"DeepL handler registered with priority {pipelineHandler.Priority}");
         }
         else
         {
-            Logger.Warning("DeepL handler is not configured or disabled, skipping registration");
+            Logger.Warning("DeepL handler is not configured or disabled, skipping registration. Please provide an API Key in the settings.");
         }
     }
     
     public override void Dispose()
     {
-        // Get the Translation module instance to access its registry
-        var moduleManager = Services.GetService<ModuleManager>();
-        var translationModule = moduleManager?.GetModule("Translation") as IPipelineHandlerRegistry;
+        var handlerRegistry = Services.GetService<IPipelineHandlerRegistry>();
         
-        if (pipelineHandler != null && translationModule != null)
+        if (pipelineHandler != null && handlerRegistry != null)
         {
-            translationModule.UnregisterHandler(pipelineHandler.Name);
+            handlerRegistry.UnregisterHandler(pipelineHandler.Name);
             pipelineHandler.Dispose();
         }
         
         base.Dispose();
+        GC.SuppressFinalize(this);
+    }
+    
+    // 4. Module must provide a UI to control its configuration
+    public override void DrawConfiguration()
+    {
+        if (moduleConfig == null) return;
+
+        var configChanged = false;
+
+        ImGui.Text("DeepL API Settings");
+        ImGui.Separator();
+
+        var tempApiKey = moduleConfig.ApiKey;
+        if (ImGui.InputText("DeepL API Key", ref tempApiKey, 100, ImGuiInputTextFlags.Password))
+        {
+            moduleConfig.ApiKey = tempApiKey;
+            configChanged = true;
+        }
+
+        var isEnabled = moduleConfig.IsEnabled;
+        if (ImGui.Checkbox("Enable DeepL Handler", ref isEnabled))
+        {
+            moduleConfig.IsEnabled = isEnabled;
+            configChanged = true;
+        }
+        ImGui.SameLine();
+        ImGuiComponents.HelpMarker("Enables the DeepL provider in the translation pipeline.\nA valid API Key is required. A plugin reload might be needed to apply changes.");
+
+        var usePro = moduleConfig.UsePro;
+        if (ImGui.Checkbox("Use Pro API URL", ref usePro))
+        {
+            moduleConfig.UsePro = usePro;
+            configChanged = true;
+        }
+
+        if (configChanged)
+        {
+            SaveConfiguration();
+        }
     }
 }
