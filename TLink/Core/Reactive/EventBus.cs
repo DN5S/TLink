@@ -6,14 +6,14 @@ using System.Threading;
 
 namespace TLink.Core.Reactive;
 
-public class EventBus : IDisposable
+public class EventBus : IEventBus
 {
     private readonly Subject<object> subject = new();
     private readonly Dictionary<Type, object> replaySubjects = new();
     private readonly Lock lockObject = new();
     private bool isDisposed;
     
-    public void Publish<T>(T message) where T : notnull
+    public void Publish<T>(T message) where T : class
     {
         if (!isDisposed)
         {
@@ -32,7 +32,7 @@ public class EventBus : IDisposable
             throw new ObjectDisposedException(nameof(EventBus));
     }
     
-    public IObservable<T> Listen<T>() where T : notnull
+    public IObservable<T> Listen<T>() where T : class
     {
         return isDisposed ? throw new ObjectDisposedException(nameof(EventBus)) : subject.OfType<T>();
     }
