@@ -63,7 +63,7 @@ public class PluginConfiguration : IPluginConfiguration
                 }
                 catch
                 {
-                    ModuleConfigs = new();
+                    ModuleConfigs = new Dictionary<string, ModuleConfiguration>();
                 }
             }
         }

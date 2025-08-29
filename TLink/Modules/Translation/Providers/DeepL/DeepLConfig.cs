@@ -8,7 +8,7 @@ public class DeepLConfig : ModuleConfiguration
     
     public string ApiUrl { get; set; } = "https://api-free.deepl.com/v2/";
     
-    public bool UsePro { get; set; } = false;
+    public bool UsePro { get; set; }
     
     public bool PreserveFormatting { get; set; } = true;
     
@@ -21,7 +21,7 @@ public class DeepLConfig : ModuleConfiguration
     /// Different from base ModuleConfiguration.IsEnabled which controls module loading.
     /// This controls whether the DeepL handler participates in the pipeline when loaded.
     /// </summary>
-    public new bool IsEnabled { get; set; } = false;
+    public new bool IsEnabled { get; set; }
     
     public DeepLConfig()
     {

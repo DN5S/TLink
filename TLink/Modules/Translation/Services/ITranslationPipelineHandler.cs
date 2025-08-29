@@ -124,9 +124,11 @@ public class TranslationContext
 public interface IPipelineHandlerRegistry
 {
     /// <summary>
-    /// Registers a new pipeline handler.
+    /// Registers a new pipeline handler with its source module name.
     /// </summary>
-    void RegisterHandler(ITranslationPipelineHandler handler);
+    /// <param name="handler">The pipeline handler to register.</param>
+    /// <param name="moduleName">The name of the module registering this handler.</param>
+    void RegisterHandler(ITranslationPipelineHandler handler, string moduleName);
     
     /// <summary>
     /// Unregisters a pipeline handler by name.

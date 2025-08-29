@@ -1,19 +1,29 @@
 using System;
+using System.Threading;
+using System.Threading.Tasks;
+using Dalamud.Interface;
 using Dalamud.Interface.Components;
 using Dalamud.Plugin.Services;
 using Microsoft.Extensions.DependencyInjection;
 using Dalamud.Bindings.ImGui;
 using TLink.Core.Module;
+using TLink.Core.UI;
 using TLink.Modules.Translation.Services;
 using TLink.Utils;
 
 namespace TLink.Modules.Translation.Providers.DeepL;
 
-[ModuleInfo("DeepL", "1.0.0", Dependencies = ["Translation"], Description = "DeepL translation provider for high-quality translations")]
+[ModuleInfo("DeepL", "1.0.0", Dependencies = ["Translation"], Description = "DeepL translation provider")]
 public class DeepLModule : ModuleBase
 {
     private DeepLConfig? moduleConfig;
     private DeepLPipelineHandler? pipelineHandler;
+    
+    // API key validation state management
+    private enum ApiKeyStatus { Idle, Validating, Valid, Invalid }
+    private ApiKeyStatus currentApiKeyStatus = ApiKeyStatus.Idle;
+    private string lastValidatedApiKey = string.Empty;
+    private Timer? validationDebounceTimer;
     
     public override string Name => "DeepL";
     public override string Version => "1.0.0";
@@ -54,14 +64,79 @@ public class DeepLModule : ModuleBase
         var handlerRegistry = Services.GetRequiredService<IPipelineHandlerRegistry>();
         pipelineHandler = Services.GetRequiredService<DeepLPipelineHandler>();
         
+        // Register or unregister based on the current state
+        UpdateHandlerRegistration(handlerRegistry);
+        
+        // Subscribe to configuration changes for dynamic updates
+        Subscriptions.Add(
+            EventBus.Listen<DeepLConfigChanged>()
+                .Subscribe(_ => UpdateHandlerRegistration(handlerRegistry))
+        );
+    }
+    
+    private void UpdateHandlerRegistration(IPipelineHandlerRegistry handlerRegistry)
+    {
+        if (pipelineHandler == null) return;
+        
         if (pipelineHandler.IsEnabled)
         {
-            handlerRegistry.RegisterHandler(pipelineHandler);
-            Logger.Information($"DeepL handler registered with priority {pipelineHandler.Priority}");
+            handlerRegistry.RegisterHandler(pipelineHandler, Name);
+            Logger.Information($"DeepL handler registered/updated. Priority: {pipelineHandler.Priority}");
         }
         else
         {
-            Logger.Warning("DeepL handler is not configured or disabled, skipping registration. Please provide an API Key in the settings.");
+            handlerRegistry.UnregisterHandler(pipelineHandler.Name);
+            Logger.Information("DeepL handler unregistered due to being disabled or misconfigured.");
+        }
+    }
+    
+    private void TriggerValidation(string apiKey)
+    {
+        // Cancel any previous validation timer
+        validationDebounceTimer?.Dispose();
+        
+        // If key is empty, return to idle state
+        if (string.IsNullOrWhiteSpace(apiKey))
+        {
+            currentApiKeyStatus = ApiKeyStatus.Idle;
+            lastValidatedApiKey = string.Empty;
+            return;
+        }
+        
+        // Skip if already validated
+        if (apiKey == lastValidatedApiKey) return;
+        
+        // Set status to validating immediately for UI feedback
+        currentApiKeyStatus = ApiKeyStatus.Validating;
+        validationDebounceTimer = new Timer(_ => 
+        {
+            Task.Run(async () => await ValidateApiKeyAsync(apiKey));
+        }, null, 500, Timeout.Infinite);
+    }
+    
+    private async Task ValidateApiKeyAsync(string apiKey)
+    {
+        try
+        {
+            // Create temporary config and client for validation
+            var tempConfig = new DeepLConfig 
+            { 
+                ApiKey = apiKey, 
+                UsePro = moduleConfig?.UsePro ?? false 
+            };
+            
+            using var apiClient = new DeepLApiClient(tempConfig, Logger);
+            var isValid = await apiClient.ValidateApiKeyAsync();
+            
+            // Update validation state
+            currentApiKeyStatus = isValid ? ApiKeyStatus.Valid : ApiKeyStatus.Invalid;
+            lastValidatedApiKey = apiKey;
+        }
+        catch (Exception ex)
+        {
+            Logger.Error($"Error validating API key: {ex.Message}");
+            currentApiKeyStatus = ApiKeyStatus.Invalid;
+            lastValidatedApiKey = apiKey;
         }
     }
     
@@ -74,6 +149,8 @@ public class DeepLModule : ModuleBase
             handlerRegistry.UnregisterHandler(pipelineHandler.Name);
             pipelineHandler.Dispose();
         }
+        
+        validationDebounceTimer?.Dispose();
         
         base.Dispose();
         GC.SuppressFinalize(this);
@@ -94,6 +171,33 @@ public class DeepLModule : ModuleBase
         {
             moduleConfig.ApiKey = tempApiKey;
             configChanged = true;
+            TriggerValidation(tempApiKey);
+        }
+        
+        // Show validation status
+        ImGui.SameLine();
+        switch (currentApiKeyStatus)
+        {
+            case ApiKeyStatus.Validating:
+                ImGui.TextDisabled("Validating...");
+                break;
+            case ApiKeyStatus.Valid:
+                ImGui.PushFont(UiBuilder.IconFont);
+                ImGui.TextColored(LayoutHelpers.Colors.Success, FontAwesomeIcon.CheckCircle.ToIconString());
+                ImGui.PopFont();
+                if (ImGui.IsItemHovered())
+                    ImGui.SetTooltip("API key is valid");
+                break;
+            case ApiKeyStatus.Invalid:
+                ImGui.PushFont(UiBuilder.IconFont);
+                ImGui.TextColored(LayoutHelpers.Colors.Error, FontAwesomeIcon.TimesCircle.ToIconString());
+                ImGui.PopFont();
+                if (ImGui.IsItemHovered())
+                    ImGui.SetTooltip("API key is invalid or has an issue");
+                break;
+            default: // ApiKeyStatus.Idle
+                ImGuiComponents.HelpMarker("Enter your DeepL API Key. Validation will start automatically.");
+                break;
         }
 
         var isEnabled = moduleConfig.IsEnabled;
@@ -103,7 +207,7 @@ public class DeepLModule : ModuleBase
             configChanged = true;
         }
         ImGui.SameLine();
-        ImGuiComponents.HelpMarker("Enables the DeepL provider in the translation pipeline.\nA valid API Key is required. A plugin reload might be needed to apply changes.");
+        ImGuiComponents.HelpMarker("Enables the DeepL provider in the translation pipeline.\nA valid API Key is required.");
 
         var usePro = moduleConfig.UsePro;
         if (ImGui.Checkbox("Use Pro API URL", ref usePro))
@@ -115,6 +219,7 @@ public class DeepLModule : ModuleBase
         if (configChanged)
         {
             SaveConfiguration();
+            EventBus.Publish(new DeepLConfigChanged());
         }
     }
 }

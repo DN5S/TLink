@@ -91,7 +91,7 @@ public class TranslationModule : ModuleBase, IPipelineHandlerRegistry
         Logger.Information("Translation orchestrator initialized");
     }
     
-    public void RegisterHandler(ITranslationPipelineHandler handler)
+    public void RegisterHandler(ITranslationPipelineHandler handler, string moduleName)
     {
         if (registeredHandlers.Any(h => h.Name == handler.Name))
         {
@@ -102,10 +102,10 @@ public class TranslationModule : ModuleBase, IPipelineHandlerRegistry
         registeredHandlers.Add(handler);
         registeredHandlers.Sort((a, b) => a.Priority.CompareTo(b.Priority));
         
-        // Notify store about registration
-        store?.Dispatch(new RegisterHandlerAction(handler, handler.GetType().Module.Name));
+        // Notify store about registration with explicit module name
+        store?.Dispatch(new RegisterHandlerAction(handler, moduleName));
         
-        Logger.Information($"Pipeline handler '{handler.Name}' registered with priority {handler.Priority}");
+        Logger.Information($"Pipeline handler '{handler.Name}' from module '{moduleName}' registered with priority {handler.Priority}");
     }
     
     public bool UnregisterHandler(string handlerName)
