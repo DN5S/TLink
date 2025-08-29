@@ -35,46 +35,22 @@ public class TranslationModule : ModuleBase, IPipelineHandlerRegistry
     public override string Version => "1.0.1";
     public override string[] Dependencies => ["Chat"];
     
-    public override void RegisterServices(IServiceCollection services)
-    {
-        // Register the orchestrator store
-        services.AddSingleton<IStore<TranslationState>>(_ =>
-        {
-            store = new Store<TranslationState>(
-                TranslationState.Initial,
-                TranslationUpdate.Update
-            );
-            
-            // Register pipeline execution handler
-            store.RegisterEffectHandler(new PipelineExecutionEffectHandler(
-                GetHandlers,
-                store,
-                EventBus,
-                Logger
-            ));
-            
-            // Register event publishing handlers
-            store.RegisterEffectHandler(new PublishHandlerRegisteredEffectHandler(EventBus));
-            store.RegisterEffectHandler(new PublishHandlerUnregisteredEffectHandler(EventBus));
-            store.RegisterEffectHandler(new PublishPipelineStartedEffectHandler(EventBus));
-            store.RegisterEffectHandler(new PublishPipelineCompletedEffectHandler(EventBus));
-            store.RegisterEffectHandler(new PublishTranslatedMessageEffectHandler(EventBus));
-            store.RegisterEffectHandler(new PublishTranslationErrorEffectHandler(EventBus));
-            
-            return store;
-        });
-        
-        // Register shared services that handlers might need
-        services.AddSingleton<SeStringProcessor>();
-        services.AddSingleton<TranslationViewModel>();
-        
-        // Register this module as the pipeline handler registry
-        services.AddSingleton<IPipelineHandlerRegistry>(_ => this);
-    }
-    
     protected override void LoadConfiguration()
     {
         moduleConfig = GetModuleConfig<TranslationConfig>();
+    }
+    
+    public override void RegisterServices(IServiceCollection services)
+    {
+        services.AddSingleton(moduleConfig!);
+        
+        services.AddSingleton<IStore<TranslationState>>(provider => new Store<TranslationState>(
+            TranslationState.Initial,
+            TranslationUpdate.Update
+        ));
+        
+        services.AddSingleton<TranslationViewModel>();
+        services.AddSingleton<IPipelineHandlerRegistry>(_ => this);
     }
     
     public override void Initialize()
@@ -82,7 +58,14 @@ public class TranslationModule : ModuleBase, IPipelineHandlerRegistry
         store = (Store<TranslationState>)Services.GetRequiredService<IStore<TranslationState>>();
         viewModel = Services.GetRequiredService<TranslationViewModel>();
         
-        // Initialize a view model with the store
+        store.RegisterEffectHandler(new PipelineExecutionEffectHandler(GetHandlers, store, EventBus, Logger));
+        store.RegisterEffectHandler(new PublishHandlerRegisteredEffectHandler(EventBus));
+        store.RegisterEffectHandler(new PublishHandlerUnregisteredEffectHandler(EventBus));
+        store.RegisterEffectHandler(new PublishPipelineStartedEffectHandler(EventBus));
+        store.RegisterEffectHandler(new PublishPipelineCompletedEffectHandler(EventBus));
+        store.RegisterEffectHandler(new PublishTranslatedMessageEffectHandler(EventBus));
+        store.RegisterEffectHandler(new PublishTranslationErrorEffectHandler(EventBus));
+        
         viewModel.Initialize(store);
         
         window = new TranslationWindow(viewModel, moduleConfig!, () =>
