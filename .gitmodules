@@ -1,0 +1,3 @@
+[submodule "ModuleKit"]
+	path = ModuleKit
+	url = git@github.com:DN5S/ModuleKit.git
