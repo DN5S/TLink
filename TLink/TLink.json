@@ -1,0 +1,10 @@
+{
+  "Author": "DN5S",
+  "Name": "TataruLink",
+  "Punchline": "Tataru Punch",
+  "Description": "Simple Message Translator",
+  "ApplicableVersion": "any",
+  "Tags": [
+    "translator"
+  ]
+}

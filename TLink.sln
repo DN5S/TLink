@@ -1,0 +1,31 @@
+﻿
+Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio Version 17
+VisualStudioVersion = 17.0.31612.314
+MinimumVisualStudioVersion = 10.0.40219.1
+Project("{4C2C5210-F388-434C-95C6-45E371F08E94}") = "TLink", "TLink\TLink.csproj", "{6795D128-B032-4036-ACBC-9ADC4CC194C9}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "ModuleKit", "ModuleKit\ModuleKit.csproj", "{CE69E20C-4786-4834-A63D-2825047D3C3A}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|x64 = Debug|x64
+		Release|x64 = Release|x64
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{6795D128-B032-4036-ACBC-9ADC4CC194C9}.Debug|x64.ActiveCfg = Debug|x64
+		{6795D128-B032-4036-ACBC-9ADC4CC194C9}.Debug|x64.Build.0 = Debug|x64
+		{6795D128-B032-4036-ACBC-9ADC4CC194C9}.Release|x64.ActiveCfg = Release|x64
+		{6795D128-B032-4036-ACBC-9ADC4CC194C9}.Release|x64.Build.0 = Release|x64
+		{CE69E20C-4786-4834-A63D-2825047D3C3A}.Debug|x64.ActiveCfg = Debug|x64
+		{CE69E20C-4786-4834-A63D-2825047D3C3A}.Debug|x64.Build.0 = Debug|x64
+		{CE69E20C-4786-4834-A63D-2825047D3C3A}.Release|x64.ActiveCfg = Release|x64
+		{CE69E20C-4786-4834-A63D-2825047D3C3A}.Release|x64.Build.0 = Release|x64
+	EndGlobalSection
+	GlobalSection(SolutionProperties) = preSolution
+		HideSolutionNode = FALSE
+	EndGlobalSection
+	GlobalSection(ExtensibilityGlobals) = postSolution
+		SolutionGuid = {0D074EC4-5EE3-4C82-99E7-6D057F8361E1}
+	EndGlobalSection
+EndGlobal
